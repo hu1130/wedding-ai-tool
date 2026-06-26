@@ -141,7 +141,7 @@ class Task:
             tasks = []
             if os.path.exists(path):
                 try:
-                    with open(path, "r", encoding="utf-8") as f:
+                    with open(path, "r", encoding="utf-8-sig") as f:
                         tasks = json.load(f)
                 except FileNotFoundError:
                     tasks = []
@@ -169,7 +169,7 @@ class Task:
         if not os.path.exists(path):
             return None
         with cls._FILE_LOCK:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8-sig") as f:
                 tasks = json.load(f)
         for t in tasks:
             if t.get("task_id") == task_id:
@@ -182,7 +182,7 @@ class Task:
         if not os.path.exists(path):
             return []
         with cls._FILE_LOCK:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8-sig") as f:
                 tasks = json.load(f)
         public_tasks = [cls.from_dict(t).to_public_dict() for t in tasks]
         return sorted(public_tasks, key=lambda x: x.get("created_at", ""), reverse=True)

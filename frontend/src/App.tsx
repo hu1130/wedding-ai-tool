@@ -94,18 +94,39 @@ const statusCopy: Record<TaskStatus, string> = {
   failed: "失败",
 };
 
+async function readApiJson<T>(response: Response, fallbackMessage: string): Promise<T> {
+  const text = await response.text();
+  let data: unknown = {};
+
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(response.ok ? `${fallbackMessage}：后端返回格式错误` : text);
+    }
+  }
+
+  if (!response.ok) {
+    const detail =
+      typeof data === "object" && data && "detail" in data
+        ? String((data as { detail?: unknown }).detail)
+        : "";
+    throw new Error(detail || fallbackMessage);
+  }
+
+  return data as T;
+}
+
 const api = {
   async health() {
     const response = await fetch("/api/health");
-    if (!response.ok) throw new Error("后端连接失败");
-    return response.json();
+    return readApiJson(response, "后端连接失败");
   },
   async upload(file: File) {
     const form = new FormData();
     form.append("file", file);
     const response = await fetch("/api/upload", { method: "POST", body: form });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || "上传失败");
+    const data = await readApiJson<{ file_id?: string; file_path?: string }>(response, "上传失败");
     return data.file_id || data.file_path;
   },
   async createTask(payload: {
@@ -124,14 +145,12 @@ const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || "创建任务失败");
+    const data = await readApiJson<{ task_id: string }>(response, "创建任务失败");
     return data.task_id as string;
   },
   async tasks() {
     const response = await fetch("/api/tasks?page=1&page_size=50");
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || "任务列表获取失败");
+    const data = await readApiJson<{ tasks: Task[] }>(response, "任务列表获取失败");
     return data.tasks as Task[];
   },
 };
