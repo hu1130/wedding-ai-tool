@@ -41,6 +41,7 @@ class Task:
         face_swap: bool = False,
         pose: str = "保持原姿势",
         preserve_face: bool = True,
+        generation_mode: str = "stable",
     ):
         self.task_id = task_id or uuid.uuid4().hex[:12]
         self.name = name or f"任务_{self.task_id}"
@@ -54,6 +55,7 @@ class Task:
         self.face_swap = face_swap
         self.pose = pose
         self.preserve_face = preserve_face
+        self.generation_mode = generation_mode
         self.output_files = {}
         self.error_message = ""
         self.created_at = datetime.now().isoformat()
@@ -79,6 +81,7 @@ class Task:
             "face_swap": self.face_swap,
             "pose": self.pose,
             "preserve_face": self.preserve_face,
+            "generation_mode": self.generation_mode,
             "output_files": self.output_files,
             "error_message": self.error_message,
             "created_at": self.created_at,
@@ -109,6 +112,7 @@ class Task:
             face_swap=data.get("face_swap", False),
             pose=data.get("pose", "保持原姿势"),
             preserve_face=data.get("preserve_face", True),
+            generation_mode=data.get("generation_mode", "stable"),
         )
         task.status = TaskStatus(data.get("status", "pending"))
         task.progress = data.get("progress", 0)

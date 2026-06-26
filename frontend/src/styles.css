@@ -472,6 +472,10 @@ h1 {
   background: var(--ink);
 }
 
+.mode-segmented button {
+  width: 70px;
+}
+
 .soon-badge {
   flex: 0 0 auto;
   padding: 7px 11px;

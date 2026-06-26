@@ -29,6 +29,7 @@ type Task = {
   face_swap: boolean;
   pose?: string;
   preserve_face?: boolean;
+  generation_mode?: "stable" | "creative";
   output_files: Record<string, boolean>;
   error_message: string;
   created_at: string;
@@ -116,6 +117,7 @@ const api = {
     face_swap: boolean;
     pose: string;
     preserve_face: boolean;
+    generation_mode: "stable" | "creative";
   }) {
     const response = await fetch("/api/create-task", {
       method: "POST",
@@ -151,6 +153,7 @@ export function App() {
   const [pose, setPose] = useState("保持原姿势");
   const [customPose, setCustomPose] = useState("");
   const [preserveFace, setPreserveFace] = useState(true);
+  const [generationMode, setGenerationMode] = useState<"stable" | "creative">("stable");
   const [resolution, setResolution] = useState("1k");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -230,6 +233,7 @@ export function App() {
         face_swap: false,
         pose: posePrompt,
         preserve_face: preserveFace,
+        generation_mode: generationMode,
       });
       setToast("任务已提交，正在生成");
       await fetchTasks();
@@ -390,6 +394,33 @@ export function App() {
 
           <div className="setting-line muted">
             <div>
+              <label>生成模式</label>
+              <p>
+                {generationMode === "stable"
+                  ? "稳定模式会锁定人物和婚纱，只生成背景并合成，适合老板演示。"
+                  : "自由模式会整图重绘，动作更自由，但脸和婚纱更容易变化。"}
+              </p>
+            </div>
+            <div className="segmented mode-segmented">
+              <button
+                className={generationMode === "stable" ? "active" : ""}
+                onClick={() => setGenerationMode("stable")}
+                type="button"
+              >
+                稳定
+              </button>
+              <button
+                className={generationMode === "creative" ? "active" : ""}
+                onClick={() => setGenerationMode("creative")}
+                type="button"
+              >
+                自由
+              </button>
+            </div>
+          </div>
+
+          <div className="setting-line muted">
+            <div>
               <label>客人换脸</label>
               <p>后端接口预留中，当前演示默认关闭。</p>
             </div>
@@ -401,7 +432,8 @@ export function App() {
             <div>
               <span>当前方案</span>
               <strong>
-                {selectedScene.label} / {resolution.toUpperCase()} / {posePrompt} / {preserveFace ? "保脸优先" : "自由生成"}
+                {selectedScene.label} / {resolution.toUpperCase()} / {posePrompt} /{" "}
+                {generationMode === "stable" ? "保款式稳定" : "自由重绘"} / {preserveFace ? "保脸优先" : "自由生成"}
               </strong>
             </div>
           </div>
@@ -534,7 +566,7 @@ function UploadCard({
 function ResultDialog({ task, onClose }: { task: Task; onClose: () => void }) {
   const imageSteps = [
     { key: "dress", label: "AI 试衣结果" },
-    { key: "scene", label: "场景生成结果" },
+    { key: "scene", label: "场景/背景结果" },
     { key: "final", label: "最终交付图" },
   ];
 

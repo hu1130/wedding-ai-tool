@@ -22,6 +22,7 @@ class CreateTaskRequest(BaseModel):
     face_swap: bool = False
     pose: str = "保持原姿势"
     preserve_face: bool = True
+    generation_mode: str = "stable"
 
 
 class BatchCreateRequest(BaseModel):
@@ -35,6 +36,9 @@ def _build_task(req: CreateTaskRequest) -> Task:
 
     if req.resolution not in {"1k", "2k"}:
         raise HTTPException(400, detail="分辨率只支持 1k 或 2k")
+
+    if req.generation_mode not in {"stable", "creative"}:
+        raise HTTPException(400, detail="生成模式只支持 stable 或 creative")
 
     try:
         model_file = resolve_upload_path(req.model_file)
@@ -55,6 +59,7 @@ def _build_task(req: CreateTaskRequest) -> Task:
         face_swap=req.face_swap,
         pose=req.pose,
         preserve_face=req.preserve_face,
+        generation_mode=req.generation_mode,
     )
 
 

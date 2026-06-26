@@ -125,6 +125,94 @@ class WanxSceneService:
 
         return None
 
+    async def generate_background(
+        self,
+        scene_name: str,
+        output_dir: str,
+        resolution: str = "1k",
+    ) -> Optional[str]:
+        """Generate an empty wedding background for stable compositing."""
+        model = "wan2.7-image" if resolution == "1k" else "wan2.7-image-pro"
+        size = "1024*1024" if resolution == "1k" else "2048*2048"
+        scene_desc = settings.scenes.get(scene_name, scene_name)
+        prompt = (
+            "Empty luxury wedding photography background, "
+            f"{scene_desc}, "
+            "full body portrait composition, realistic depth of field, elegant lighting, "
+            "no people, no person, no bride, no groom, no model, no mannequin, "
+            "no dress, no face, no body, no text, no logo, no watermark."
+        )
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "X-DashScope-Async": "enable",
+        }
+        payload = {
+            "model": model,
+            "input": {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"text": prompt}],
+                    }
+                ],
+            },
+            "parameters": {
+                "size": size,
+                "n": 1,
+                "negative_prompt": (
+                    "people, person, bride, groom, model, mannequin, human, face, body, "
+                    "dress, text, logo, watermark, low quality, distorted"
+                ),
+            },
+        }
+
+        async with httpx.AsyncClient(timeout=180) as client:
+            resp = await client.post(self.API_URL, headers=headers, json=payload)
+            resp.raise_for_status()
+            result = resp.json()
+
+            task_id = result.get("output", {}).get("task_id")
+            if not task_id:
+                raise Exception(f"背景生成提交失败: {result}")
+
+            status_url = f"https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}"
+            for _ in range(self.MAX_POLL_ATTEMPTS):
+                status_resp = await client.get(status_url, headers=headers)
+                status_resp.raise_for_status()
+                status_result = status_resp.json()
+                status = status_result.get("output", {}).get("task_status")
+
+                if status == "SUCCEEDED":
+                    choices = status_result.get("output", {}).get("choices", [])
+                    content = []
+                    if choices:
+                        content = choices[0].get("message", {}).get("content", [])
+                    img_url = next(
+                        (item.get("image") for item in content if isinstance(item, dict) and item.get("image")),
+                        None,
+                    )
+                    if img_url:
+                        img_resp = await client.get(img_url)
+                        img_resp.raise_for_status()
+                        output_path = os.path.join(output_dir, f"background_{resolution}.jpg")
+                        with open(output_path, "wb") as f:
+                            f.write(img_resp.content)
+                        return output_path
+                    raise Exception(f"背景生成成功但未返回图片地址: {status_result}")
+                elif status == "FAILED":
+                    output = status_result.get("output", {})
+                    err = output.get("message", "未知错误")
+                    code = output.get("code", "FAILED")
+                    raise Exception(f"背景生成失败[{code}]: {err}; DashScope task_id={task_id}")
+
+                await asyncio.sleep(2)
+
+            raise TimeoutError(f"背景生成任务轮询超时; DashScope task_id={task_id}")
+
+        return None
+
     def build_scene_prompt(
         self,
         scene_name: str,

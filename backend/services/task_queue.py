@@ -9,6 +9,7 @@ from backend.config import settings
 from backend.models.task import Task, TaskStatus, StepStatus
 from backend.services.aliyun_dress import AliyunTryOnService
 from backend.services.wanx_scene import WanxSceneService
+from backend.utils.composite import composite_subject_on_background
 
 
 class TaskPipeline:
@@ -58,10 +59,21 @@ class TaskPipeline:
             task.progress = 60
             task.save()
 
-            scene_result = await self._step_scene(task, current_image, output_dir)
-            task.output_files["scene"] = scene_result
-            task.steps["scene"] = StepStatus.COMPLETED
-            current_image = scene_result
+            if getattr(task, "generation_mode", "stable") == "stable":
+                background_result = await self._step_background(task, output_dir)
+                task.output_files["scene"] = background_result
+                task.steps["scene"] = StepStatus.COMPLETED
+                current_image = composite_subject_on_background(
+                    subject_image_path=current_image,
+                    background_image_path=background_result,
+                    output_dir=output_dir,
+                )
+                task.output_files["composite"] = current_image
+            else:
+                scene_result = await self._step_scene(task, current_image, output_dir)
+                task.output_files["scene"] = scene_result
+                task.steps["scene"] = StepStatus.COMPLETED
+                current_image = scene_result
             task.progress = 90
             task.save()
 
@@ -122,6 +134,18 @@ class TaskPipeline:
         except Exception as e:
             print(f"[场景生成失败] {e}")
             raise RuntimeError(f"场景生成失败: {e}") from e
+
+    async def _step_background(self, task: Task, output_dir: str) -> Optional[str]:
+        """Generate an empty background for stable compositing."""
+        try:
+            return await self.wanx.generate_background(
+                scene_name=task.scene,
+                output_dir=output_dir,
+                resolution=task.resolution,
+            )
+        except Exception as e:
+            print(f"[背景生成失败] {e}")
+            raise RuntimeError(f"背景生成失败: {e}") from e
 
 
 # 全局任务队列
