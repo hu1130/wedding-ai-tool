@@ -1,0 +1,165 @@
+"""任务队列 & 流水线编排（纯阿里云版）"""
+import asyncio
+import os
+import shutil
+from datetime import datetime
+from typing import Optional
+
+from backend.config import settings
+from backend.models.task import Task, TaskStatus, StepStatus
+from backend.services.aliyun_dress import AliyunTryOnService
+from backend.services.wanx_scene import WanxSceneService
+
+
+class TaskPipeline:
+    """任务流水线：AI试衣 → 场景生成"""
+
+    def __init__(self):
+        self.tryon = AliyunTryOnService()
+        self.wanx = WanxSceneService()
+
+    async def run_task(self, task_id: str):
+        """执行单个任务的全流程"""
+        task = Task.get(task_id)
+        if not task:
+            return
+
+        task.status = TaskStatus.PROCESSING
+        task.save()
+
+        try:
+            output_dir = os.path.join(settings.output_dir, task.task_id)
+            os.makedirs(output_dir, exist_ok=True)
+
+            current_image = task.model_file
+
+            # ========== 第一步：AI试衣（换装） ==========
+            task.steps["dress"] = StepStatus.PROCESSING
+            task.progress = 10
+            task.save()
+
+            dress_result = await self._step_tryon(task, output_dir)
+            task.output_files["dress"] = dress_result
+            task.steps["dress"] = StepStatus.COMPLETED
+            current_image = dress_result
+            task.progress = 50
+            task.save()
+
+            if task.face_swap:
+                task.steps["face"] = StepStatus.FAILED
+                task.error_message = "换脸步骤尚未实现"
+                task.status = TaskStatus.FAILED
+                task.save()
+                return
+            task.steps["face"] = StepStatus.SKIPPED
+
+            # ========== 第二步：场景生成 ==========
+            task.steps["scene"] = StepStatus.PROCESSING
+            task.progress = 60
+            task.save()
+
+            scene_result = await self._step_scene(task, current_image, output_dir)
+            task.output_files["scene"] = scene_result
+            task.steps["scene"] = StepStatus.COMPLETED
+            current_image = scene_result
+            task.progress = 90
+            task.save()
+
+            # ========== 输出最终结果 ==========
+            final_path = os.path.join(output_dir, "final.jpg")
+            if os.path.exists(current_image):
+                shutil.copy2(current_image, final_path)
+                task.output_files["final"] = final_path
+            else:
+                task.status = TaskStatus.FAILED
+                task.error_message = "最终结果文件不存在"
+                task.save()
+                return
+
+            task.steps["upscale"] = StepStatus.SKIPPED
+            task.progress = 100
+            task.status = TaskStatus.COMPLETED
+            task.completed_at = datetime.now().isoformat()
+            task.save()
+
+        except Exception as e:
+            task.status = TaskStatus.FAILED
+            task.error_message = str(e)
+            for step_name, step_status in task.steps.items():
+                if step_status == StepStatus.PROCESSING:
+                    task.steps[step_name] = StepStatus.FAILED
+            task.save()
+
+    async def _step_tryon(self, task: Task, output_dir: str) -> Optional[str]:
+        """AI试衣步骤"""
+        try:
+            result = await self.tryon.try_on(
+                model_image_path=task.model_file,
+                garment_image_path=task.dress_file,
+                output_dir=output_dir,
+                restore_face=task.preserve_face and not task.face_swap,
+            )
+            return result
+        except Exception as e:
+            print(f"[AI试衣失败] {e}")
+            raise RuntimeError(f"AI试衣失败: {e}") from e
+
+    async def _step_scene(self, task: Task, current_image: str, output_dir: str) -> Optional[str]:
+        """场景生成步骤"""
+        try:
+            prompt = self.wanx.build_scene_prompt(
+                scene_name=task.scene,
+                pose=task.pose,
+                preserve_face=task.preserve_face,
+            )
+            result = await self.wanx.generate_scene(
+                input_image_path=current_image,
+                prompt=prompt,
+                output_dir=output_dir,
+                resolution=task.resolution,
+            )
+            return result
+        except Exception as e:
+            print(f"[场景生成失败] {e}")
+            raise RuntimeError(f"场景生成失败: {e}") from e
+
+
+# 全局任务队列
+_task_queue: asyncio.Queue = None
+_pipeline: Optional[TaskPipeline] = None
+
+
+async def init_queue():
+    """初始化任务队列"""
+    global _task_queue
+    if _task_queue is not None:
+        return
+    _task_queue = asyncio.Queue()
+    asyncio.create_task(_queue_worker())
+
+
+async def enqueue_task(task_id: str):
+    """提交任务到队列"""
+    if _task_queue is None:
+        await init_queue()
+    await _task_queue.put(task_id)
+
+
+async def _queue_worker():
+    """队列消费者"""
+    global _pipeline
+    while True:
+        task_id = await _task_queue.get()
+        try:
+            if _pipeline is None:
+                _pipeline = TaskPipeline()
+            await _pipeline.run_task(task_id)
+        except Exception as e:
+            print(f"[队列错误] 任务 {task_id}: {e}")
+            task = Task.get(task_id)
+            if task:
+                task.status = TaskStatus.FAILED
+                task.error_message = str(e)
+                task.save()
+        finally:
+            _task_queue.task_done()

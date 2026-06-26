@@ -1,0 +1,36 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Node / Vite
+frontend/node_modules/
+frontend/.vite/
+
+# Runtime data
+uploads/
+outputs/
+backend/tasks.json
+server.log
+server.err.log
+server.pid
+
+# Local generated and test artifacts
+debug_tryon*/
+live_api_test/
+frontend_test_assets/
+stress_runtime*/
+test_runtime*/
+work_test_tasks.json
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
