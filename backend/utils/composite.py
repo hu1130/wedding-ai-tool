@@ -7,6 +7,13 @@ from statistics import median
 
 from PIL import Image, ImageFilter, ImageOps
 
+try:
+    import cv2
+    import numpy as np
+except ImportError:  # pragma: no cover - optional local quality upgrade
+    cv2 = None
+    np = None
+
 
 def _color_distance(a: tuple[int, int, int], b: tuple[int, int, int]) -> int:
     return abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2])
@@ -34,6 +41,63 @@ def _estimate_background_color(image: Image.Image) -> tuple[int, int, int]:
 
 
 def _build_foreground_mask(image: Image.Image) -> Image.Image:
+    if cv2 is not None and np is not None:
+        return _build_grabcut_mask(image)
+    return _build_color_flood_mask(image)
+
+
+def _build_grabcut_mask(image: Image.Image) -> Image.Image:
+    rgb = image.convert("RGB")
+    original_size = rgb.size
+    small = ImageOps.contain(rgb, (520, 520), method=Image.Resampling.LANCZOS)
+    bgr = cv2.cvtColor(np.array(small), cv2.COLOR_RGB2BGR)
+    height, width = bgr.shape[:2]
+
+    # The try-on model keeps the subject centered. A broad rectangle lets
+    # GrabCut separate white dresses from light studio backgrounds better than
+    # color thresholding can.
+    rect = (
+        int(width * 0.10),
+        int(height * 0.03),
+        int(width * 0.80),
+        int(height * 0.95),
+    )
+    grabcut_mask = np.zeros((height, width), np.uint8)
+    bgd_model = np.zeros((1, 65), np.float64)
+    fgd_model = np.zeros((1, 65), np.float64)
+    cv2.grabCut(bgr, grabcut_mask, rect, bgd_model, fgd_model, 8, cv2.GC_INIT_WITH_RECT)
+
+    mask = np.where(
+        (grabcut_mask == cv2.GC_FGD) | (grabcut_mask == cv2.GC_PR_FGD),
+        255,
+        0,
+    ).astype("uint8")
+    mask = _keep_center_components(mask)
+    kernel = np.ones((5, 5), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    alpha = Image.fromarray(mask, "L")
+    alpha = alpha.resize(original_size, Image.Resampling.LANCZOS)
+    return alpha.filter(ImageFilter.GaussianBlur(1.4))
+
+
+def _keep_center_components(mask):
+    count, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, 8)
+    keep = np.zeros_like(mask)
+    height, width = mask.shape
+    min_area = height * width * 0.001
+
+    for idx in range(1, count):
+        area = stats[idx, cv2.CC_STAT_AREA]
+        center_x, _ = centroids[idx]
+        if area >= min_area and width * 0.08 <= center_x <= width * 0.92:
+            keep[labels == idx] = 255
+
+    return keep
+
+
+def _build_color_flood_mask(image: Image.Image) -> Image.Image:
     rgb = image.convert("RGB")
     original_size = rgb.size
     max_side = 760
@@ -78,9 +142,9 @@ def _build_foreground_mask(image: Image.Image) -> Image.Image:
             if visited[row + x]:
                 mask_pixels[x, y] = 0
 
-    mask = mask.filter(ImageFilter.MaxFilter(9))
-    mask = mask.filter(ImageFilter.MinFilter(5))
-    mask = mask.filter(ImageFilter.GaussianBlur(2.0))
+    mask = mask.filter(ImageFilter.MinFilter(7))
+    mask = mask.filter(ImageFilter.MaxFilter(5))
+    mask = mask.filter(ImageFilter.GaussianBlur(1.5))
 
     if mask.size != original_size:
         mask = mask.resize(original_size, Image.Resampling.LANCZOS)
