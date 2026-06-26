@@ -7,6 +7,7 @@ from typing import Optional
 import httpx
 
 from backend.config import settings
+from backend.utils.garment import prepare_tryon_garments
 
 
 class AliyunTryOnService:
@@ -46,17 +47,30 @@ class AliyunTryOnService:
 
         with open(model_image_path, "rb") as f:
             model_b64 = base64.b64encode(f.read()).decode("utf-8")
-        with open(garment_image_path, "rb") as f:
-            garment_b64 = base64.b64encode(f.read()).decode("utf-8")
+        try:
+            top_garment_path, bottom_garment_path = prepare_tryon_garments(
+                garment_image_path,
+                output_dir,
+            )
+        except Exception as exc:
+            print(f"[garment preprocess skipped] {exc}")
+            top_garment_path = garment_image_path
+            bottom_garment_path = garment_image_path
+
+        with open(top_garment_path, "rb") as f:
+            top_garment_b64 = base64.b64encode(f.read()).decode("utf-8")
+        with open(bottom_garment_path, "rb") as f:
+            bottom_garment_b64 = base64.b64encode(f.read()).decode("utf-8")
 
         payload = {
             "model": "aitryon-plus",
             "input": {
                 "person_image_url": f"data:image/jpeg;base64,{model_b64}",
-                "top_garment_url": f"data:image/jpeg;base64,{garment_b64}",
-                # 婚纱是连衣裙/整裙。只传 top 会让模型把裙摆重绘成短裙；
-                # 同图同时传 top/bottom 能更稳定保留全身裙廓形。
-                "bottom_garment_url": f"data:image/jpeg;base64,{garment_b64}",
+                "top_garment_url": f"data:image/jpeg;base64,{top_garment_b64}",
+                # Split full gowns into bodice and floor-length skirt references.
+                # Sending the same full dress as both top/bottom can make the
+                # try-on model invent a shorter skirt.
+                "bottom_garment_url": f"data:image/jpeg;base64,{bottom_garment_b64}",
             },
             "parameters": {
                 "restore_face": restore_face,
