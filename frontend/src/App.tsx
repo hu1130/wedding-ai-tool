@@ -5,6 +5,7 @@ import {
   ChevronRight,
   CircleDashed,
   ImagePlus,
+  LockKeyhole,
   Loader2,
   MonitorCheck,
   Play,
@@ -24,6 +25,9 @@ type Task = {
   name: string;
   status: TaskStatus;
   progress: number;
+  model_file?: string;
+  dress_file?: string;
+  face_file?: string | null;
   scene: string;
   resolution: string;
   face_swap: boolean;
@@ -68,6 +72,8 @@ const poses = [
   { value: "回眸微笑，身体轻微侧转", label: "回眸", tone: "情绪表达" },
   { value: "坐姿，裙摆自然铺开", label: "坐姿", tone: "画面丰富" },
 ];
+
+const demoScenes = new Set(["海边", "教堂", "花园"]);
 
 const slotCopy: Record<UploadSlot, { title: string; subtitle: string; required: boolean }> = {
   model: {
@@ -162,6 +168,12 @@ function StatusIcon({ status }: { status: TaskStatus }) {
   return <CircleDashed size={16} />;
 }
 
+function taskDisplayName(task: Task) {
+  const name = task.name?.trim();
+  if (!name || /^\?+$/.test(name)) return `任务 ${task.task_id}`;
+  return name;
+}
+
 export function App() {
   const [uploads, setUploads] = useState<Record<UploadSlot, UploadState>>({
     model: emptyUpload,
@@ -174,6 +186,7 @@ export function App() {
   const [preserveFace, setPreserveFace] = useState(true);
   const [generationMode, setGenerationMode] = useState<"stable" | "creative">("stable");
   const [resolution, setResolution] = useState("1k");
+  const [demoMode, setDemoMode] = useState(true);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [health, setHealth] = useState<"checking" | "ok" | "down">("checking");
@@ -207,6 +220,24 @@ export function App() {
     const timer = window.setInterval(fetchTasks, 3000);
     return () => window.clearInterval(timer);
   }, [fetchTasks]);
+
+  useEffect(() => {
+    if (!demoMode) return;
+    setGenerationMode("stable");
+    setResolution("1k");
+    setPreserveFace(true);
+    setPose("保持原姿势");
+    setCustomPose("");
+    setScene((current) => (demoScenes.has(current) ? current : "海边"));
+  }, [demoMode]);
+
+  function setDemoScene(nextScene: string) {
+    if (demoMode && !demoScenes.has(nextScene)) {
+      setToast("老板演示模式只开放海边、教堂、花园三个稳定场景");
+      return;
+    }
+    setScene(nextScene);
+  }
 
   async function handleUpload(slot: UploadSlot, file: File) {
     if (!file.type.startsWith("image/")) {
@@ -338,14 +369,38 @@ export function App() {
             <WandSparkles size={22} />
           </div>
 
+          <div className={demoMode ? "demo-card active" : "demo-card"}>
+            <div className="demo-card-copy">
+              <LockKeyhole size={20} />
+              <div>
+                <strong>老板演示模式</strong>
+                <span>锁定稳定生成、1K 预览、保脸优先和安全场景，优先避免脸变、裙子变。</span>
+              </div>
+            </div>
+            <button
+              className={demoMode ? "switch-button active" : "switch-button"}
+              onClick={() => setDemoMode((value) => !value)}
+              type="button"
+            >
+              {demoMode ? "演示中" : "自定义"}
+            </button>
+          </div>
+
           <div className="setting-block">
             <label>拍摄场景</label>
             <div className="scene-grid">
               {scenes.map((item) => (
                 <button
-                  className={item.value === scene ? "scene-card active" : "scene-card"}
+                  className={[
+                    "scene-card",
+                    item.value === scene ? "active" : "",
+                    demoMode && !demoScenes.has(item.value) ? "disabled" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                   key={item.value}
-                  onClick={() => setScene(item.value)}
+                  onClick={() => setDemoScene(item.value)}
+                  disabled={demoMode && !demoScenes.has(item.value)}
                 >
                   <strong>{item.label}</strong>
                   <span>{item.tone}</span>
@@ -359,12 +414,20 @@ export function App() {
             <div className="scene-grid pose-grid">
               {poses.map((item) => (
                 <button
-                  className={item.value === pose && !customPose.trim() ? "scene-card active" : "scene-card"}
+                  className={[
+                    "scene-card",
+                    item.value === pose && !customPose.trim() ? "active" : "",
+                    demoMode && item.value !== "保持原姿势" ? "disabled" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                   key={item.value}
                   onClick={() => {
+                    if (demoMode && item.value !== "保持原姿势") return;
                     setPose(item.value);
                     setCustomPose("");
                   }}
+                  disabled={demoMode && item.value !== "保持原姿势"}
                 >
                   <strong>{item.label}</strong>
                   <span>{item.tone}</span>
@@ -375,6 +438,7 @@ export function App() {
               className="pose-input"
               value={customPose}
               onChange={(event) => setCustomPose(event.target.value)}
+              disabled={demoMode}
               placeholder="也可以自定义动作，例如：双手捧花，微侧身，看向镜头"
             />
           </div>
@@ -389,7 +453,11 @@ export function App() {
                 <button
                   key={item}
                   className={resolution === item ? "active" : ""}
-                  onClick={() => setResolution(item)}
+                  onClick={() => {
+                    if (demoMode && item !== "1k") return;
+                    setResolution(item);
+                  }}
+                  disabled={demoMode && item !== "1k"}
                 >
                   {item.toUpperCase()}
                 </button>
@@ -404,7 +472,11 @@ export function App() {
             </div>
             <button
               className={preserveFace ? "switch-button active" : "switch-button"}
-              onClick={() => setPreserveFace((value) => !value)}
+              onClick={() => {
+                if (demoMode) return;
+                setPreserveFace((value) => !value);
+              }}
+              disabled={demoMode}
               type="button"
             >
               {preserveFace ? "已开启" : "已关闭"}
@@ -430,7 +502,11 @@ export function App() {
               </button>
               <button
                 className={generationMode === "creative" ? "active" : ""}
-                onClick={() => setGenerationMode("creative")}
+                onClick={() => {
+                  if (demoMode) return;
+                  setGenerationMode("creative");
+                }}
+                disabled={demoMode}
                 type="button"
               >
                 自由
@@ -449,7 +525,7 @@ export function App() {
           <div className="review-card">
             <MonitorCheck size={20} />
             <div>
-              <span>当前方案</span>
+              <span>{demoMode ? "当前方案 · 演示锁定" : "当前方案"}</span>
               <strong>
                 {selectedScene.label} / {resolution.toUpperCase()} / {posePrompt} /{" "}
                 {generationMode === "stable" ? "保款式稳定" : "自由重绘"} / {preserveFace ? "保脸优先" : "自由生成"}
@@ -486,7 +562,7 @@ export function App() {
                   {statusCopy[task.status]}
                 </span>
                 <div className="task-main">
-                  <strong>{task.name || `任务 ${task.task_id}`}</strong>
+                  <strong>{taskDisplayName(task)}</strong>
                   <span>
                     {task.scene} / {task.resolution.toUpperCase()} / 进度 {Math.round(task.progress)}%
                   </span>
@@ -583,10 +659,14 @@ function UploadCard({
 }
 
 function ResultDialog({ task, onClose }: { task: Task; onClose: () => void }) {
+  const comparisonImages = [
+    { key: "model", label: "模特原图", src: `/api/task/${task.task_id}/input/model` },
+    { key: "dress", label: "婚纱款式", src: `/api/task/${task.task_id}/input/dress` },
+    { key: "final", label: "最终交付图", src: `/api/task/${task.task_id}/result` },
+  ];
   const imageSteps = [
-    { key: "dress", label: "AI 试衣结果" },
-    { key: "scene", label: "场景/背景结果" },
-    { key: "final", label: "最终交付图" },
+    { key: "dress", label: "款式/试衣步骤" },
+    { key: "scene", label: "场景生成结果" },
   ];
 
   return (
@@ -598,7 +678,7 @@ function ResultDialog({ task, onClose }: { task: Task; onClose: () => void }) {
               <StatusIcon status={task.status} />
               {statusCopy[task.status]}
             </span>
-            <h2>{task.name || `任务 ${task.task_id}`}</h2>
+            <h2>{taskDisplayName(task)}</h2>
           </div>
           <button onClick={onClose} aria-label="关闭结果">
             <X size={22} />
@@ -611,18 +691,45 @@ function ResultDialog({ task, onClose }: { task: Task; onClose: () => void }) {
             <span>{task.error_message || "生成失败，请检查素材或后端配置。"}</span>
           </div>
         ) : (
-          <div className="result-grid">
-            {imageSteps.map((step) => (
-              <div className="result-card" key={step.key}>
-                <strong>{step.label}</strong>
-                {task.output_files?.[step.key] ? (
-                  <img src={`/api/task/${task.task_id}/${step.key === "final" ? "result" : `step/${step.key}`}`} alt={step.label} />
-                ) : (
-                  <div className="result-empty">暂未生成</div>
-                )}
+          <>
+            <div className="comparison-strip">
+              <div className="comparison-heading">
+                <span className="section-kicker">交付对比</span>
+                <strong>老板一眼看懂：原模特、原婚纱、最终图</strong>
               </div>
-            ))}
-          </div>
+              <div className="comparison-grid">
+                {comparisonImages.map((item) => (
+                  <div className="comparison-card" key={item.key}>
+                    <strong>{item.label}</strong>
+                    {item.key === "final" && !task.output_files?.final ? (
+                      <div className="result-empty">暂未生成</div>
+                    ) : (
+                      <img src={item.src} alt={item.label} />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="process-results">
+              <div className="comparison-heading compact">
+                <span className="section-kicker">过程文件</span>
+                <strong>用于排查款式、场景和最终图差异</strong>
+              </div>
+              <div className="result-grid">
+                {imageSteps.map((step) => (
+                  <div className="result-card" key={step.key}>
+                    <strong>{step.label}</strong>
+                    {task.output_files?.[step.key] ? (
+                      <img src={`/api/task/${task.task_id}/step/${step.key}`} alt={step.label} />
+                    ) : (
+                      <div className="result-empty">暂未生成</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
         )}
 
         {task.output_files?.final && (

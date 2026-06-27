@@ -61,3 +61,26 @@ async def get_step_result(task_id: str, step_name: str):
 
     media_type = _image_media_type(step_path)
     return FileResponse(step_path, media_type=media_type, filename=_download_name(task_id, step_name, media_type))
+
+
+@router.get("/task/{task_id}/input/{input_name}")
+async def get_input_image(task_id: str, input_name: str):
+    """获取任务输入素材图片。input_name: model / dress / face"""
+    task = Task.get(task_id)
+    if not task:
+        raise HTTPException(404, detail="任务不存在")
+
+    input_paths = {
+        "model": task.model_file,
+        "dress": task.dress_file,
+        "face": task.face_file,
+    }
+    if input_name not in input_paths:
+        raise HTTPException(404, detail="输入素材不存在")
+
+    image_path = input_paths[input_name]
+    if not image_path or not os.path.exists(image_path):
+        raise HTTPException(404, detail="输入素材不存在")
+
+    media_type = _image_media_type(image_path)
+    return FileResponse(image_path, media_type=media_type, filename=_download_name(task_id, input_name, media_type))
