@@ -149,3 +149,45 @@ def prepare_tryon_garments(garment_image_path: str, output_dir: str) -> tuple[st
     _save_reference(top_reference, top_path)
     _save_reference(bottom_reference, bottom_path)
     return top_path, bottom_path
+
+
+def is_floor_length_gown(garment_image_path: str) -> bool:
+    """Heuristically detect product photos that represent long bridal gowns."""
+    source = Image.open(garment_image_path).convert("RGB")
+    mask = _build_mask(source)
+    bbox = _mask_bbox(mask)
+    if bbox is None:
+        return False
+
+    left, top, right, bottom = bbox
+    width, height = source.size
+    garment_width = max(1, right - left)
+    garment_height = max(1, bottom - top)
+    aspect_ratio = garment_height / garment_width
+    reaches_lower_frame = bottom >= height * 0.82
+    starts_high = top <= height * 0.28
+    has_flared_bottom = True
+    if np is not None:
+        arr = np.array(mask) > 24
+        crop = arr[top:bottom, left:right]
+        has_flared_bottom = _has_flared_bottom(crop)
+
+    return aspect_ratio >= 1.08 and reaches_lower_frame and starts_high and has_flared_bottom
+
+
+def _band_width(mask, fraction: float) -> int:
+    height = mask.shape[0]
+    y = int(height * fraction)
+    band = mask[max(0, y - 3) : min(height, y + 4), :]
+    xs = np.where(band.any(axis=0))[0]
+    return int(len(xs))
+
+
+def _has_flared_bottom(mask) -> bool:
+    if mask.size == 0:
+        return False
+
+    mid_width = max(_band_width(mask, 0.52), 1)
+    lower_width = max(_band_width(mask, 0.88), _band_width(mask, 0.92))
+    bbox_width = max(mask.shape[1], 1)
+    return lower_width >= mid_width * 1.28 and lower_width >= bbox_width * 0.58

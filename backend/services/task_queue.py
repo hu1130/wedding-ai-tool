@@ -10,6 +10,7 @@ from backend.models.task import Task, TaskStatus, StepStatus
 from backend.services.aliyun_dress import AliyunTryOnService
 from backend.services.wanx_scene import WanxSceneService
 from backend.utils.composite import composite_subject_on_background
+from backend.utils.garment import is_floor_length_gown
 
 
 class TaskPipeline:
@@ -33,16 +34,23 @@ class TaskPipeline:
             os.makedirs(output_dir, exist_ok=True)
 
             current_image = task.model_file
+            floor_length_gown = is_floor_length_gown(task.dress_file)
 
             # ========== 第一步：AI试衣（换装） ==========
             task.steps["dress"] = StepStatus.PROCESSING
             task.progress = 10
             task.save()
 
-            dress_result = await self._step_tryon(task, output_dir)
-            task.output_files["dress"] = dress_result
+            if floor_length_gown:
+                # For full bridal gowns, the try-on API tends to inherit the
+                # source model's knee-length silhouette. Use the product gown as
+                # a direct reference in the scene generation step instead.
+                dress_result = task.dress_file
+            else:
+                dress_result = await self._step_tryon(task, output_dir)
+                current_image = dress_result
             task.steps["dress"] = StepStatus.COMPLETED
-            current_image = dress_result
+            task.output_files["dress"] = dress_result
             task.progress = 50
             task.save()
 
@@ -59,18 +67,27 @@ class TaskPipeline:
             task.progress = 60
             task.save()
 
-            if getattr(task, "generation_mode", "stable") == "stable":
+            if floor_length_gown:
+                scene_result = await self._step_reference_gown_scene(task, output_dir)
+                task.output_files["scene"] = scene_result
+                current_image = scene_result
+                task.steps["scene"] = StepStatus.COMPLETED
+            elif getattr(task, "generation_mode", "stable") == "stable":
                 background_result = await self._step_background(task, output_dir)
                 task.output_files["scene"] = background_result
-                task.steps["scene"] = StepStatus.COMPLETED
                 current_image = composite_subject_on_background(
                     subject_image_path=current_image,
                     background_image_path=background_result,
                     output_dir=output_dir,
                 )
                 task.output_files["composite"] = current_image
+                task.steps["scene"] = StepStatus.COMPLETED
             else:
-                scene_result = await self._step_scene(task, current_image, output_dir)
+                scene_result = await self._step_scene(
+                    task,
+                    current_image,
+                    output_dir,
+                )
                 task.output_files["scene"] = scene_result
                 task.steps["scene"] = StepStatus.COMPLETED
                 current_image = scene_result
@@ -78,8 +95,11 @@ class TaskPipeline:
             task.save()
 
             # ========== 输出最终结果 ==========
-            final_path = os.path.join(output_dir, "final.jpg")
             if os.path.exists(current_image):
+                extension = os.path.splitext(current_image)[1].lower() or ".jpg"
+                if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
+                    extension = ".jpg"
+                final_path = os.path.join(output_dir, f"final{extension}")
                 shutil.copy2(current_image, final_path)
                 task.output_files["final"] = final_path
             else:
@@ -116,24 +136,63 @@ class TaskPipeline:
             print(f"[AI试衣失败] {e}")
             raise RuntimeError(f"AI试衣失败: {e}") from e
 
-    async def _step_scene(self, task: Task, current_image: str, output_dir: str) -> Optional[str]:
+    async def _step_scene(
+        self,
+        task: Task,
+        current_image: str,
+        output_dir: str,
+        force_floor_length: bool = False,
+    ) -> Optional[str]:
         """场景生成步骤"""
         try:
             prompt = self.wanx.build_scene_prompt(
                 scene_name=task.scene,
                 pose=task.pose,
                 preserve_face=task.preserve_face,
+                force_floor_length=force_floor_length,
+            )
+            negative_prompt = (
+                "短裙，及膝裙，迷你裙，普通连衣裙，露出小腿，裙摆被截断，"
+                "短款礼服，改变婚纱廓形，换脸，脸部变形，扭曲，变形，模糊，"
+                "低质量，水印，文字"
             )
             result = await self.wanx.generate_scene(
                 input_image_path=current_image,
                 prompt=prompt,
                 output_dir=output_dir,
                 resolution=task.resolution,
+                negative_prompt=negative_prompt,
             )
             return result
         except Exception as e:
             print(f"[场景生成失败] {e}")
             raise RuntimeError(f"场景生成失败: {e}") from e
+
+    async def _step_reference_gown_scene(self, task: Task, output_dir: str) -> Optional[str]:
+        """Generate a full-gown image from model + product dress references."""
+        try:
+            prompt = self.wanx.build_reference_gown_prompt(
+                scene_name=task.scene,
+                pose=task.pose,
+                preserve_face=task.preserve_face,
+            )
+            negative_prompt = (
+                "两条裙子，双层裙，短裙外面套长裙，上下两件裙子，保留原短裙，"
+                "及膝裙，迷你裙，普通连衣裙，露出小腿，裙摆断开，裙摆被截断，"
+                "错误领口，错误腰线，改变婚纱款式，换脸，脸部变形，扭曲，"
+                "低质量，水印，文字，logo"
+            )
+            return await self.wanx.generate_scene(
+                input_image_path=task.model_file,
+                prompt=prompt,
+                output_dir=output_dir,
+                resolution=task.resolution,
+                negative_prompt=negative_prompt,
+                reference_image_paths=[task.dress_file],
+            )
+        except Exception as e:
+            print(f"[婚纱参考生成失败] {e}")
+            raise RuntimeError(f"婚纱参考生成失败: {e}") from e
 
     async def _step_background(self, task: Task, output_dir: str) -> Optional[str]:
         """Generate an empty background for stable compositing."""
