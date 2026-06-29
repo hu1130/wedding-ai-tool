@@ -37,6 +37,7 @@ class Task:
         dress_file: str = "",
         face_file: Optional[str] = None,
         scene: str = "海边",
+        scene_prompt: str = "",
         resolution: str = "1k",
         face_swap: bool = False,
         pose: str = "保持原姿势",
@@ -53,6 +54,7 @@ class Task:
         self.dress_file = dress_file
         self.face_file = face_file
         self.scene = scene
+        self.scene_prompt = scene_prompt
         self.resolution = resolution
         self.face_swap = face_swap
         self.pose = pose
@@ -81,6 +83,7 @@ class Task:
             "dress_file": self.dress_file,
             "face_file": self.face_file,
             "scene": self.scene,
+            "scene_prompt": self.scene_prompt,
             "resolution": self.resolution,
             "face_swap": self.face_swap,
             "pose": self.pose,
@@ -114,6 +117,7 @@ class Task:
             dress_file=data.get("dress_file", ""),
             face_file=data.get("face_file"),
             scene=data.get("scene", "海边"),
+            scene_prompt=data.get("scene_prompt", ""),
             resolution=data.get("resolution", "1k"),
             face_swap=data.get("face_swap", False),
             pose=data.get("pose", "保持原姿势"),

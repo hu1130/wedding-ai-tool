@@ -452,6 +452,17 @@ h1 {
   font-size: 13px;
 }
 
+.scene-card em {
+  width: fit-content;
+  padding: 4px 7px;
+  border-radius: 999px;
+  color: var(--gold);
+  background: #fff4dc;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+}
+
 .scene-card.active {
   border-color: var(--gold);
   background: #171412;
@@ -462,10 +473,16 @@ h1 {
   color: #d8cbbb;
 }
 
+.scene-card.active em {
+  color: #171412;
+  background: var(--rose);
+}
+
 .scene-card.disabled,
 .segmented button:disabled,
 .switch-button:disabled,
-.pose-input:disabled {
+.pose-input:disabled,
+.scene-textarea:disabled {
   cursor: not-allowed;
   opacity: 0.48;
 }
@@ -487,7 +504,26 @@ h1 {
   outline: none;
 }
 
-.pose-input:focus {
+.scene-textarea {
+  width: 100%;
+  min-height: 86px;
+  resize: vertical;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fffdf9;
+  color: var(--ink);
+  outline: none;
+}
+
+.field-hint {
+  margin-top: -4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pose-input:focus,
+.scene-textarea:focus {
   border-color: var(--gold);
   box-shadow: 0 0 0 3px rgba(185, 138, 73, 0.12);
 }
@@ -726,6 +762,9 @@ h1 {
 .task-main span {
   color: var(--muted);
   font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .progress-track {
@@ -772,6 +811,34 @@ h1 {
 
 .dialog-head h2 {
   margin-top: 12px;
+}
+
+.task-config-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: -4px 0 18px;
+}
+
+.task-config-strip span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.task-config-strip strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .dialog-head button,

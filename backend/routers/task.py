@@ -13,6 +13,9 @@ from backend.utils.image import resolve_upload_path
 
 router = APIRouter(prefix="/api", tags=["任务"])
 
+CUSTOM_SCENE_NAME = "自定义背景"
+MAX_SCENE_PROMPT_LENGTH = 240
+
 
 def _is_inside(path: str, root: str) -> bool:
     try:
@@ -93,6 +96,7 @@ def _clone_task_for_rerun(source: Task) -> Task:
         dress_file=source.dress_file,
         face_file=source.face_file,
         scene=source.scene,
+        scene_prompt=source.scene_prompt,
         resolution=source.resolution,
         face_swap=source.face_swap,
         pose=source.pose,
@@ -109,6 +113,7 @@ class CreateTaskRequest(BaseModel):
     dress_file: str
     face_file: Optional[str] = None
     scene: str = "海边"
+    scene_prompt: Optional[str] = None
     resolution: str = "1k"
     face_swap: bool = False
     pose: str = "保持原姿势"
@@ -121,9 +126,17 @@ class BatchCreateRequest(BaseModel):
 
 
 def _build_task(req: CreateTaskRequest) -> Task:
-    if req.scene not in settings.scenes:
+    scene_prompt = (req.scene_prompt or "").strip()
+
+    if len(scene_prompt) > MAX_SCENE_PROMPT_LENGTH:
+        raise HTTPException(400, detail=f"自定义背景描述不能超过 {MAX_SCENE_PROMPT_LENGTH} 个字符")
+
+    if req.scene == CUSTOM_SCENE_NAME:
+        if not scene_prompt:
+            raise HTTPException(400, detail="请选择预设背景，或填写自定义背景描述")
+    elif req.scene not in settings.scenes:
         valid = list(settings.scenes.keys())
-        raise HTTPException(400, detail=f"不支持的场景: {req.scene}，可选: {valid}")
+        raise HTTPException(400, detail=f"不支持的场景: {req.scene}，可选: {valid} 或 {CUSTOM_SCENE_NAME}")
 
     if req.resolution not in {"1k", "2k"}:
         raise HTTPException(400, detail="分辨率只支持 1k 或 2k")
@@ -146,6 +159,7 @@ def _build_task(req: CreateTaskRequest) -> Task:
         dress_file=dress_file,
         face_file=face_file,
         scene=req.scene,
+        scene_prompt=scene_prompt,
         resolution=req.resolution,
         face_swap=req.face_swap,
         pose=req.pose,

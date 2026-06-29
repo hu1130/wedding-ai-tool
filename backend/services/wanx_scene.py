@@ -35,6 +35,13 @@ class WanxSceneService:
             return ".webp"
         return ".jpg"
 
+    @staticmethod
+    def _scene_description(scene_name: str, scene_prompt: Optional[str] = None) -> str:
+        custom_prompt = (scene_prompt or "").strip()
+        if custom_prompt:
+            return custom_prompt
+        return settings.scenes.get(scene_name, scene_name)
+
     async def generate_scene(
         self,
         input_image_path: str,
@@ -142,11 +149,12 @@ class WanxSceneService:
         scene_name: str,
         output_dir: str,
         resolution: str = "1k",
+        scene_prompt: Optional[str] = None,
     ) -> Optional[str]:
         """Generate an empty wedding background for stable compositing."""
         model = "wan2.7-image" if resolution == "1k" else "wan2.7-image-pro"
         size = "1024*1024" if resolution == "1k" else "2048*2048"
-        scene_desc = settings.scenes.get(scene_name, scene_name)
+        scene_desc = self._scene_description(scene_name, scene_prompt)
         prompt = (
             "Empty luxury wedding photography background, "
             f"{scene_desc}, "
@@ -241,9 +249,10 @@ class WanxSceneService:
         pose: str = "保持原姿势",
         preserve_face: bool = True,
         force_floor_length: bool = False,
+        scene_prompt: Optional[str] = None,
     ) -> str:
         """根据场景名构建提示词"""
-        scene_desc = settings.scenes.get(scene_name, scene_name)
+        scene_desc = self._scene_description(scene_name, scene_prompt)
         face_prompt = (
             "严格保留输入图片中人物的五官、脸型、发型、表情和身份特征，不要换脸，不要改变面部相似度，"
             if preserve_face
@@ -274,9 +283,10 @@ class WanxSceneService:
         gender: str = "女性",
         pose: str = "保持原姿势",
         preserve_face: bool = True,
+        scene_prompt: Optional[str] = None,
     ) -> str:
         """Build prompt for model + product-gown multi-reference generation."""
-        scene_desc = settings.scenes.get(scene_name, scene_name)
+        scene_desc = self._scene_description(scene_name, scene_prompt)
         face_prompt = (
             "严格保留第一张图中模特的五官、脸型、发型、表情和身份特征，不要换脸，"
             if preserve_face

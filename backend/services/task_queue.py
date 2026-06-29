@@ -158,6 +158,7 @@ class TaskPipeline:
                 pose=task.pose,
                 preserve_face=task.preserve_face,
                 force_floor_length=force_floor_length,
+                scene_prompt=task.scene_prompt,
             )
             negative_prompt = (
                 "短裙，及膝裙，迷你裙，普通连衣裙，露出小腿，裙摆被截断，"
@@ -184,6 +185,7 @@ class TaskPipeline:
                 scene_name=task.scene,
                 pose=task.pose,
                 preserve_face=task.preserve_face,
+                scene_prompt=task.scene_prompt,
             )
             negative_prompt = (
                 "两条裙子，双层裙，短裙外面套长裙，上下两件裙子，保留原短裙，"
@@ -211,6 +213,7 @@ class TaskPipeline:
                 scene_name=task.scene,
                 output_dir=output_dir,
                 resolution=task.resolution,
+                scene_prompt=task.scene_prompt,
             )
         except Exception as e:
             print(f"[背景生成失败] {e}")

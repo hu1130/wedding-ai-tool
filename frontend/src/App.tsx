@@ -30,6 +30,7 @@ type Task = {
   dress_file?: string;
   face_file?: string | null;
   scene: string;
+  scene_prompt?: string;
   resolution: string;
   face_swap: boolean;
   pose?: string;
@@ -59,12 +60,15 @@ const emptyUpload: UploadState = {
 };
 
 const scenes = [
-  { value: "海边", label: "海边日落", tone: "浪漫光影" },
-  { value: "教堂", label: "教堂婚礼", tone: "庄重仪式" },
-  { value: "花园", label: "欧式花园", tone: "柔和自然" },
-  { value: "中式庭院", label: "中式庭院", tone: "东方雅致" },
-  { value: "城堡", label: "欧式城堡", tone: "奢华大片" },
-  { value: "森林", label: "森林秘境", tone: "清透仙气" },
+  { value: "海边", label: "海边日落", tone: "浪漫光影", demoSafe: true },
+  { value: "教堂", label: "教堂婚礼", tone: "庄重仪式", demoSafe: true },
+  { value: "花园", label: "欧式花园", tone: "柔和自然", demoSafe: true },
+  { value: "影棚", label: "高级影棚", tone: "干净稳妥", demoSafe: true },
+  { value: "城堡", label: "欧式城堡", tone: "奢华大片", demoSafe: false },
+  { value: "中式庭院", label: "中式庭院", tone: "东方雅致", demoSafe: false },
+  { value: "森林", label: "森林秘境", tone: "清透仙气", demoSafe: false },
+  { value: "天台夜景", label: "天台夜景", tone: "现代高级", demoSafe: false },
+  { value: "自定义背景", label: "自定义背景", tone: "自由描述", demoSafe: false },
 ];
 
 const poses = [
@@ -76,7 +80,7 @@ const poses = [
   { value: "坐姿，裙摆自然铺开", label: "坐姿", tone: "画面丰富" },
 ];
 
-const demoScenes = new Set(["海边", "教堂", "花园"]);
+const demoScenes = new Set(scenes.filter((item) => item.demoSafe).map((item) => item.value));
 
 const slotCopy: Record<UploadSlot, { title: string; subtitle: string; required: boolean }> = {
   model: {
@@ -143,6 +147,7 @@ const api = {
     dress_file: string;
     face_file?: string | null;
     scene: string;
+    scene_prompt?: string;
     resolution: string;
     face_swap: boolean;
     pose: string;
@@ -197,6 +202,12 @@ function taskVersionLabel(task: Task) {
   return `V${task.rerun_index || 1}`;
 }
 
+function taskSceneSummary(task: Pick<Task, "scene" | "scene_prompt">) {
+  const prompt = task.scene_prompt?.trim();
+  if (task.scene === "自定义背景" && prompt) return `自定义背景：${prompt}`;
+  return task.scene;
+}
+
 export function App() {
   const [uploads, setUploads] = useState<Record<UploadSlot, UploadState>>({
     model: emptyUpload,
@@ -204,6 +215,7 @@ export function App() {
     face: emptyUpload,
   });
   const [scene, setScene] = useState("海边");
+  const [customScenePrompt, setCustomScenePrompt] = useState("");
   const [pose, setPose] = useState("保持原姿势");
   const [customPose, setCustomPose] = useState("");
   const [preserveFace, setPreserveFace] = useState(true);
@@ -222,6 +234,8 @@ export function App() {
     () => scenes.find((item) => item.value === scene) || scenes[0],
     [scene],
   );
+  const scenePrompt = scene === "自定义背景" ? customScenePrompt.trim() : "";
+  const sceneSummary = scenePrompt ? `自定义背景：${scenePrompt}` : selectedScene.label;
   const posePrompt = customPose.trim() || pose;
   const selectedVersions = useMemo(() => {
     if (!selectedTask) return [];
@@ -260,15 +274,17 @@ export function App() {
     setPreserveFace(true);
     setPose("保持原姿势");
     setCustomPose("");
+    setCustomScenePrompt("");
     setScene((current) => (demoScenes.has(current) ? current : "海边"));
   }, [demoMode]);
 
   function setDemoScene(nextScene: string) {
     if (demoMode && !demoScenes.has(nextScene)) {
-      setToast("老板演示模式只开放海边、教堂、花园三个稳定场景");
+      setToast("老板演示模式只开放海边、教堂、花园、影棚四个稳定场景");
       return;
     }
     setScene(nextScene);
+    if (nextScene !== "自定义背景") setCustomScenePrompt("");
   }
 
   async function handleUpload(slot: UploadSlot, file: File) {
@@ -303,6 +319,10 @@ export function App() {
       setToast("请先上传模特原图和婚纱图片");
       return;
     }
+    if (scene === "自定义背景" && !scenePrompt) {
+      setToast("请填写自定义背景描述，或选择一个预设背景");
+      return;
+    }
 
     setCreating(true);
     try {
@@ -311,6 +331,7 @@ export function App() {
         dress_file: dressFile,
         face_file: uploads.face.fileId,
         scene,
+        scene_prompt: scenePrompt,
         resolution,
         face_swap: false,
         pose: posePrompt,
@@ -479,8 +500,21 @@ export function App() {
                 >
                   <strong>{item.label}</strong>
                   <span>{item.tone}</span>
+                  <em>{item.demoSafe ? "演示安全" : "自由测试"}</em>
                 </button>
               ))}
+            </div>
+            <textarea
+              className="scene-textarea"
+              value={customScenePrompt}
+              onChange={(event) => setCustomScenePrompt(event.target.value.slice(0, 240))}
+              disabled={demoMode || scene !== "自定义背景"}
+              placeholder="自定义背景，例如：法式酒店旋转楼梯，暖色吊灯，浅金色花艺，真实婚礼摄影光线"
+            />
+            <div className="field-hint">
+              {scene === "自定义背景"
+                ? `${customScenePrompt.length}/240，描述背景和光线，不要写换脸、改裙子这类要求`
+                : "预设背景会自动使用更稳的婚纱摄影提示词"}
             </div>
           </div>
 
@@ -602,7 +636,7 @@ export function App() {
             <div>
               <span>{demoMode ? "当前方案 · 演示锁定" : "当前方案"}</span>
               <strong>
-                {selectedScene.label} / {resolution.toUpperCase()} / {posePrompt} /{" "}
+                {sceneSummary} / {resolution.toUpperCase()} / {posePrompt} /{" "}
                 {generationMode === "stable" ? "保款式稳定" : "自由重绘"} / {preserveFace ? "保脸优先" : "自由生成"}
               </strong>
             </div>
@@ -629,13 +663,14 @@ export function App() {
               <strong>还没有生成任务</strong>
               <span>上传素材后，点击开始生成即可创建第一条任务。</span>
             </div>
-          ) : (
-            tasks.map((task) => {
-              const deleting = deletingTaskId === task.task_id;
-              const canDelete = task.status !== "processing";
+            ) : (
+              tasks.map((task) => {
+                const deleting = deletingTaskId === task.task_id;
+                const canDelete = task.status !== "processing";
+                const sceneInfo = taskSceneSummary(task);
 
-              return (
-                <div className="task-row" key={task.task_id}>
+                return (
+                  <div className="task-row" key={task.task_id}>
                   <button className="task-open-button" onClick={() => setSelectedTask(task)} type="button">
                     <span className={`status-pill ${task.status}`}>
                       <StatusIcon status={task.status} />
@@ -646,8 +681,8 @@ export function App() {
                         {taskDisplayName(task)}
                         <span className="version-badge">{taskVersionLabel(task)}</span>
                       </strong>
-                      <span>
-                        {task.scene} / {task.resolution.toUpperCase()} / 进度 {Math.round(task.progress)}%
+                      <span title={sceneInfo}>
+                        {sceneInfo} / {task.resolution.toUpperCase()} / 进度 {Math.round(task.progress)}%
                       </span>
                     </div>
                     <div className="progress-track">
@@ -783,6 +818,7 @@ function ResultDialog({
   onRerun: (task: Task) => void;
   onSelectVersion: (task: Task) => void;
 }) {
+  const sceneInfo = taskSceneSummary(task);
   const comparisonImages = [
     { key: "model", label: "模特原图", src: `/api/task/${task.task_id}/input/model` },
     { key: "dress", label: "婚纱款式", src: `/api/task/${task.task_id}/input/dress` },
@@ -807,6 +843,24 @@ function ResultDialog({
           <button onClick={onClose} aria-label="关闭结果">
             <X size={22} />
           </button>
+        </div>
+
+        <div className="task-config-strip">
+          <span>
+            背景 <strong>{sceneInfo}</strong>
+          </span>
+          <span>
+            动作 <strong>{task.pose || "保持原姿势"}</strong>
+          </span>
+          <span>
+            规格 <strong>{task.resolution.toUpperCase()}</strong>
+          </span>
+          <span>
+            模式 <strong>{task.generation_mode === "creative" ? "自由重绘" : "保款式稳定"}</strong>
+          </span>
+          <span>
+            人脸 <strong>{task.preserve_face ? "保脸优先" : "自由生成"}</strong>
+          </span>
         </div>
 
         {versions.length > 0 && (
