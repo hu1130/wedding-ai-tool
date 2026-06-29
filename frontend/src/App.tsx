@@ -11,6 +11,7 @@ import {
   Play,
   RefreshCw,
   Sparkles,
+  Trash2,
   UploadCloud,
   WandSparkles,
   X,
@@ -159,6 +160,13 @@ const api = {
     const data = await readApiJson<{ tasks: Task[] }>(response, "任务列表获取失败");
     return data.tasks as Task[];
   },
+  async deleteTask(taskId: string) {
+    const response = await fetch(`/api/task/${taskId}`, { method: "DELETE" });
+    return readApiJson<{ removed_dirs: number; removed_files: number; success: boolean }>(
+      response,
+      "删除任务失败",
+    );
+  },
 };
 
 function StatusIcon({ status }: { status: TaskStatus }) {
@@ -192,6 +200,7 @@ export function App() {
   const [health, setHealth] = useState<"checking" | "ok" | "down">("checking");
   const [toast, setToast] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
 
   const selectedScene = useMemo(
     () => scenes.find((item) => item.value === scene) || scenes[0],
@@ -204,7 +213,7 @@ export function App() {
       const nextTasks = await api.tasks();
       setTasks(nextTasks);
       setSelectedTask((current) =>
-        current ? nextTasks.find((task) => task.task_id === current.task_id) || current : current,
+        current ? nextTasks.find((task) => task.task_id === current.task_id) || null : current,
       );
     } catch (error) {
       console.error(error);
@@ -291,6 +300,28 @@ export function App() {
       setToast(error instanceof Error ? error.message : "创建任务失败");
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleDeleteTask(task: Task) {
+    if (task.status === "processing") {
+      setToast("任务正在生成中，完成或失败后再删除");
+      return;
+    }
+
+    const ok = window.confirm(`确定删除「${taskDisplayName(task)}」吗？任务记录、生成图和未被其他任务使用的上传素材都会删除。`);
+    if (!ok) return;
+
+    setDeletingTaskId(task.task_id);
+    try {
+      await api.deleteTask(task.task_id);
+      setToast("任务已删除");
+      setSelectedTask((current) => (current?.task_id === task.task_id ? null : current));
+      await fetchTasks();
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "删除任务失败");
+    } finally {
+      setDeletingTaskId(null);
     }
   }
 
@@ -555,28 +586,52 @@ export function App() {
               <span>上传素材后，点击开始生成即可创建第一条任务。</span>
             </div>
           ) : (
-            tasks.map((task) => (
-              <button className="task-row" key={task.task_id} onClick={() => setSelectedTask(task)}>
-                <span className={`status-pill ${task.status}`}>
-                  <StatusIcon status={task.status} />
-                  {statusCopy[task.status]}
-                </span>
-                <div className="task-main">
-                  <strong>{taskDisplayName(task)}</strong>
-                  <span>
-                    {task.scene} / {task.resolution.toUpperCase()} / 进度 {Math.round(task.progress)}%
-                  </span>
+            tasks.map((task) => {
+              const deleting = deletingTaskId === task.task_id;
+              const canDelete = task.status !== "processing";
+
+              return (
+                <div className="task-row" key={task.task_id}>
+                  <button className="task-open-button" onClick={() => setSelectedTask(task)} type="button">
+                    <span className={`status-pill ${task.status}`}>
+                      <StatusIcon status={task.status} />
+                      {statusCopy[task.status]}
+                    </span>
+                    <div className="task-main">
+                      <strong>{taskDisplayName(task)}</strong>
+                      <span>
+                        {task.scene} / {task.resolution.toUpperCase()} / 进度 {Math.round(task.progress)}%
+                      </span>
+                    </div>
+                    <div className="progress-track">
+                      <span style={{ width: `${Math.max(4, Math.min(task.progress, 100))}%` }} />
+                    </div>
+                  </button>
+                  <button
+                    aria-label="删除任务"
+                    className="icon-danger-button"
+                    disabled={deleting || !canDelete}
+                    onClick={() => handleDeleteTask(task)}
+                    title={canDelete ? "删除任务与文件" : "生成中暂不能删除"}
+                    type="button"
+                  >
+                    {deleting ? <Loader2 size={16} className="spin" /> : <Trash2 size={16} />}
+                  </button>
                 </div>
-                <div className="progress-track">
-                  <span style={{ width: `${Math.max(4, Math.min(task.progress, 100))}%` }} />
-                </div>
-              </button>
-            ))
+              );
+            })
           )}
         </div>
       </section>
 
-      {selectedTask && <ResultDialog task={selectedTask} onClose={() => setSelectedTask(null)} />}
+      {selectedTask && (
+        <ResultDialog
+          deleting={deletingTaskId === selectedTask.task_id}
+          task={selectedTask}
+          onClose={() => setSelectedTask(null)}
+          onDelete={handleDeleteTask}
+        />
+      )}
 
       {toast && (
         <div className="toast" role="status">
@@ -658,7 +713,17 @@ function UploadCard({
   );
 }
 
-function ResultDialog({ task, onClose }: { task: Task; onClose: () => void }) {
+function ResultDialog({
+  deleting,
+  task,
+  onClose,
+  onDelete,
+}: {
+  deleting: boolean;
+  task: Task;
+  onClose: () => void;
+  onDelete: (task: Task) => void;
+}) {
   const comparisonImages = [
     { key: "model", label: "模特原图", src: `/api/task/${task.task_id}/input/model` },
     { key: "dress", label: "婚纱款式", src: `/api/task/${task.task_id}/input/dress` },
@@ -732,12 +797,23 @@ function ResultDialog({ task, onClose }: { task: Task; onClose: () => void }) {
           </>
         )}
 
-        {task.output_files?.final && (
-          <a className="download-button" href={`/api/task/${task.task_id}/result`} download>
-            <ArrowDownToLine size={18} />
-            下载最终图
-          </a>
-        )}
+        <div className="dialog-actions">
+          {task.output_files?.final && (
+            <a className="download-button" href={`/api/task/${task.task_id}/result`} download>
+              <ArrowDownToLine size={18} />
+              下载最终图
+            </a>
+          )}
+          <button
+            className="delete-button"
+            disabled={deleting || task.status === "processing"}
+            onClick={() => onDelete(task)}
+            type="button"
+          >
+            {deleting ? <Loader2 size={18} className="spin" /> : <Trash2 size={18} />}
+            删除这一组
+          </button>
+        </div>
       </div>
     </div>
   );

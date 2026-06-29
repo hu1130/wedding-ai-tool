@@ -1,4 +1,6 @@
 """任务管理接口"""
+import os
+import shutil
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -10,6 +12,59 @@ from backend.services.task_queue import enqueue_task
 from backend.utils.image import resolve_upload_path
 
 router = APIRouter(prefix="/api", tags=["任务"])
+
+
+def _is_inside(path: str, root: str) -> bool:
+    try:
+        path_abs = os.path.abspath(path)
+        root_abs = os.path.abspath(root)
+        return os.path.commonpath([path_abs, root_abs]) == root_abs
+    except ValueError:
+        return False
+
+
+def _remove_file_if_safe(path: Optional[str], root: str) -> bool:
+    if not path or not _is_inside(path, root) or not os.path.isfile(path):
+        return False
+    os.remove(path)
+    return True
+
+
+def _remove_dir_if_safe(path: str, root: str) -> bool:
+    if not _is_inside(path, root) or not os.path.isdir(path):
+        return False
+    shutil.rmtree(path)
+    return True
+
+
+def _remaining_input_paths() -> set[str]:
+    paths: set[str] = set()
+    for task in Task.list_internal():
+        for candidate in [task.model_file, task.dress_file, task.face_file]:
+            if candidate:
+                paths.add(os.path.abspath(candidate))
+    return paths
+
+
+def _cleanup_task_files(task: Task) -> dict:
+    removed_files = 0
+    removed_dirs = 0
+
+    output_dir = os.path.join(settings.output_dir, task.task_id)
+    if _remove_dir_if_safe(output_dir, settings.output_dir):
+        removed_dirs += 1
+    else:
+        for path in task.output_files.values():
+            if _remove_file_if_safe(path, settings.output_dir):
+                removed_files += 1
+
+    remaining_inputs = _remaining_input_paths()
+    for path in [task.model_file, task.dress_file, task.face_file]:
+        if path and os.path.abspath(path) not in remaining_inputs:
+            if _remove_file_if_safe(path, settings.upload_dir):
+                removed_files += 1
+
+    return {"removed_files": removed_files, "removed_dirs": removed_dirs}
 
 
 class CreateTaskRequest(BaseModel):
@@ -103,6 +158,24 @@ async def get_task(task_id: str):
     if not task:
         raise HTTPException(404, detail="任务不存在")
     return {"success": True, "task": task.to_public_dict()}
+
+
+@router.delete("/task/{task_id}")
+async def delete_task(task_id: str):
+    """删除任务记录和本地文件"""
+    task = Task.get(task_id)
+    if not task:
+        raise HTTPException(404, detail="任务不存在")
+
+    if task.status.value == "processing":
+        raise HTTPException(409, detail="任务正在生成中，请完成或失败后再删除")
+
+    deleted_task = Task.delete(task_id)
+    if not deleted_task:
+        raise HTTPException(404, detail="任务不存在")
+
+    cleanup = _cleanup_task_files(deleted_task)
+    return {"success": True, "task_id": task_id, **cleanup}
 
 
 @router.get("/tasks")

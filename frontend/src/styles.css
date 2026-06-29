@@ -616,20 +616,55 @@ h1 {
 .task-row {
   min-height: 74px;
   display: grid;
-  grid-template-columns: 126px minmax(0, 1fr) 160px;
+  grid-template-columns: minmax(0, 1fr) 42px;
   align-items: center;
-  gap: 18px;
+  gap: 12px;
   width: 100%;
-  text-align: left;
-  padding: 14px;
+  padding: 10px;
   border-radius: 8px;
   border: 1px solid var(--line);
   background: #fffdf9;
+}
+
+.task-row:hover,
+.task-row:focus-within {
+  border-color: var(--gold);
+}
+
+.task-open-button {
+  min-width: 0;
+  width: 100%;
+  display: grid;
+  grid-template-columns: 126px minmax(0, 1fr) 160px;
+  align-items: center;
+  gap: 18px;
+  padding: 4px;
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
   cursor: pointer;
 }
 
-.task-row:hover {
-  border-color: var(--gold);
+.icon-danger-button {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--danger);
+  background: #fff8f6;
+  border: 1px solid rgba(184, 74, 67, 0.22);
+  cursor: pointer;
+}
+
+.icon-danger-button:hover {
+  background: #fae7e4;
+  border-color: rgba(184, 74, 67, 0.42);
+}
+
+.icon-danger-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .status-pill {
@@ -819,6 +854,42 @@ h1 {
   text-decoration: none;
 }
 
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  flex-wrap: wrap;
+}
+
+.dialog-actions .download-button {
+  margin-top: 0;
+}
+
+.delete-button {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 18px;
+  border-radius: 8px;
+  color: var(--danger);
+  background: #fff8f6;
+  border: 1px solid rgba(184, 74, 67, 0.28);
+  cursor: pointer;
+}
+
+.delete-button:hover {
+  background: #fae7e4;
+  border-color: rgba(184, 74, 67, 0.46);
+}
+
+.delete-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .toast {
   position: fixed;
   right: 24px;
@@ -906,6 +977,10 @@ h1 {
   }
 
   .task-row {
+    grid-template-columns: 1fr;
+  }
+
+  .task-open-button {
     grid-template-columns: 1fr;
   }
 

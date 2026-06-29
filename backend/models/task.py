@@ -186,3 +186,41 @@ class Task:
                 tasks = json.load(f)
         public_tasks = [cls.from_dict(t).to_public_dict() for t in tasks]
         return sorted(public_tasks, key=lambda x: x.get("created_at", ""), reverse=True)
+
+    @classmethod
+    def list_internal(cls) -> list["Task"]:
+        path = cls._data_path()
+        if not os.path.exists(path):
+            return []
+        with cls._FILE_LOCK:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                tasks = json.load(f)
+        return [cls.from_dict(t) for t in tasks]
+
+    @classmethod
+    def delete(cls, task_id: str) -> Optional["Task"]:
+        path = cls._data_path()
+        if not os.path.exists(path):
+            return None
+
+        with cls._FILE_LOCK:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                tasks = json.load(f)
+
+            deleted = None
+            remaining = []
+            for item in tasks:
+                if item.get("task_id") == task_id:
+                    deleted = item
+                else:
+                    remaining.append(item)
+
+            if deleted is None:
+                return None
+
+            tmp_path = f"{path}.tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(remaining, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, path)
+
+        return cls.from_dict(deleted)
