@@ -20,6 +20,12 @@ FACE_ARTIFACT_NEGATIVE_PROMPT = (
     "disconnected neck, floating head, mismatched face lighting, mismatched skin tone"
 )
 
+ACTION_POSE_MODES = {"light", "experimental"}
+
+
+def _is_action_pose(task: Task) -> bool:
+    return getattr(task, "pose_mode", "stable") in ACTION_POSE_MODES
+
 
 class TaskPipeline:
     """任务流水线：AI试衣 → 场景生成"""
@@ -43,16 +49,17 @@ class TaskPipeline:
 
             current_image = task.model_file
             floor_length_gown = is_floor_length_gown(task.dress_file)
+            action_pose = _is_action_pose(task)
+            use_reference_gown = floor_length_gown or action_pose
 
             # ========== 第一步：AI试衣（换装） ==========
             task.steps["dress"] = StepStatus.PROCESSING
             task.progress = 10
             task.save()
 
-            if floor_length_gown:
-                # For full bridal gowns, the try-on API tends to inherit the
-                # source model's knee-length silhouette. Use the product gown as
-                # a direct reference in the scene generation step instead.
+            if use_reference_gown:
+                # Full gowns and changed poses are more stable when the product
+                # dress remains a direct reference in the final generation step.
                 dress_result = task.dress_file
             else:
                 dress_result = await self._step_tryon(task, output_dir)
@@ -75,8 +82,12 @@ class TaskPipeline:
             task.progress = 60
             task.save()
 
-            if floor_length_gown:
-                scene_result = await self._step_reference_gown_scene(task, output_dir)
+            if use_reference_gown:
+                scene_result = await self._step_reference_gown_scene(
+                    task,
+                    output_dir,
+                    force_floor_length=floor_length_gown or action_pose,
+                )
                 task.output_files["scene"] = scene_result
                 current_image = scene_result
                 task.steps["scene"] = StepStatus.COMPLETED
@@ -178,19 +189,26 @@ class TaskPipeline:
             print(f"[场景生成失败] {e}")
             raise RuntimeError(f"场景生成失败: {e}") from e
 
-    async def _step_reference_gown_scene(self, task: Task, output_dir: str) -> Optional[str]:
+    async def _step_reference_gown_scene(
+        self,
+        task: Task,
+        output_dir: str,
+        force_floor_length: bool = False,
+    ) -> Optional[str]:
         """Generate a full-gown image from model + product dress references."""
         try:
             prompt = self.wanx.build_reference_gown_prompt(
                 scene_name=task.scene,
                 pose=task.pose,
                 preserve_face=task.preserve_face,
+                pose_mode=task.pose_mode,
+                force_floor_length=force_floor_length,
                 scene_prompt=task.scene_prompt,
             )
             negative_prompt = (
                 "两条裙子，双层裙，短裙外面套长裙，上下两件裙子，保留原短裙，"
                 "及膝裙，迷你裙，普通连衣裙，露出小腿，裙摆断开，裙摆被截断，"
-                "错误领口，错误腰线，改变婚纱款式，换脸，脸部变形，扭曲，"
+                "错误领口，错误腰线，改变婚纱款式，手部畸形，多余手指，换脸，脸部变形，扭曲，"
                 "低质量，水印，文字，logo"
             )
             negative_prompt += FACE_ARTIFACT_NEGATIVE_PROMPT

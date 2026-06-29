@@ -15,6 +15,9 @@ router = APIRouter(prefix="/api", tags=["任务"])
 
 CUSTOM_SCENE_NAME = "自定义背景"
 MAX_SCENE_PROMPT_LENGTH = 240
+POSE_MODES = {"stable", "light", "experimental"}
+STABLE_POSE = "保持原姿势"
+LIGHT_POSES = {"正面站姿，双臂自然下垂", "轻微行走感，裙摆自然展开"}
 
 
 def _is_inside(path: str, root: str) -> bool:
@@ -100,6 +103,7 @@ def _clone_task_for_rerun(source: Task) -> Task:
         resolution=source.resolution,
         face_swap=source.face_swap,
         pose=source.pose,
+        pose_mode=source.pose_mode,
         preserve_face=source.preserve_face,
         generation_mode=source.generation_mode,
         parent_task_id=root_task_id,
@@ -117,6 +121,7 @@ class CreateTaskRequest(BaseModel):
     resolution: str = "1k"
     face_swap: bool = False
     pose: str = "保持原姿势"
+    pose_mode: str = "stable"
     preserve_face: bool = True
     generation_mode: str = "stable"
 
@@ -127,6 +132,8 @@ class BatchCreateRequest(BaseModel):
 
 def _build_task(req: CreateTaskRequest) -> Task:
     scene_prompt = (req.scene_prompt or "").strip()
+    pose = (req.pose or STABLE_POSE).strip() or STABLE_POSE
+    pose_mode = req.pose_mode
 
     if len(scene_prompt) > MAX_SCENE_PROMPT_LENGTH:
         raise HTTPException(400, detail=f"自定义背景描述不能超过 {MAX_SCENE_PROMPT_LENGTH} 个字符")
@@ -143,6 +150,12 @@ def _build_task(req: CreateTaskRequest) -> Task:
 
     if req.generation_mode not in {"stable", "creative"}:
         raise HTTPException(400, detail="生成模式只支持 stable 或 creative")
+
+    if pose_mode not in POSE_MODES:
+        raise HTTPException(400, detail="动作模式只支持 stable、light 或 experimental")
+
+    if pose_mode == "stable" and pose != STABLE_POSE:
+        pose_mode = "light" if pose in LIGHT_POSES else "experimental"
 
     try:
         model_file = resolve_upload_path(req.model_file)
@@ -162,7 +175,8 @@ def _build_task(req: CreateTaskRequest) -> Task:
         scene_prompt=scene_prompt,
         resolution=req.resolution,
         face_swap=req.face_swap,
-        pose=req.pose,
+        pose=pose,
+        pose_mode=pose_mode,
         preserve_face=req.preserve_face,
         generation_mode=req.generation_mode,
     )

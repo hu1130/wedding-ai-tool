@@ -283,6 +283,8 @@ class WanxSceneService:
         gender: str = "女性",
         pose: str = "保持原姿势",
         preserve_face: bool = True,
+        pose_mode: str = "stable",
+        force_floor_length: bool = False,
         scene_prompt: Optional[str] = None,
     ) -> str:
         """Build prompt for model + product-gown multi-reference generation."""
@@ -293,13 +295,26 @@ class WanxSceneService:
             else ""
         )
         face_blend_prompt = self._face_blend_prompt() if preserve_face else ""
+        pose_mode_prompt = {
+            "stable": "动作优先保持第一张图的自然站姿，不做夸张姿势变化；",
+            "light": "只允许轻微动作变化，手臂和身体可以自然调整，但不要大幅转身、坐下或改变人物身份；",
+            "experimental": "按照姿势要求生成更明显的动作，但必须优先保证人脸相似度、身体比例和婚纱完整性；",
+        }.get(pose_mode, "动作自然，人物身份和婚纱完整性优先；")
+        length_prompt = (
+            "必须保持长款拖地婚纱，裙摆从腰部自然展开并覆盖双腿直到地面，保留拖尾和落地长度，"
+            "不允许变成及膝裙、短裙或普通连衣裙。"
+            if force_floor_length
+            else "保留第二张图原本的裙长、裙摆体量和服装结构。"
+        )
         return (
             "根据两张参考图生成一张真实婚纱照。"
             f"第一张图是模特参考，{face_prompt}{face_blend_prompt}保留自然站姿和身体比例；"
             "第二张图是唯一的婚纱款式参考，必须让模特穿第二张图里的同一件婚纱，"
-            "保留心形抹胸领口、腰线、大 A 字裙摆、蕾丝纹理、拖地裙长和裙尾宽度。"
+            "保留原始领口、腰线、裙摆轮廓、面料质感、蕾丝或纱面纹理。"
+            f"{length_prompt}"
             "必须完全替换第一张图里的原服装，不要保留原短裙，不要在短裙外面再加一层长裙，"
-            "画面中只能有一条连续完整的拖地婚纱，从胸口到地面自然连接。"
-            f"拍摄场景：{scene_desc}；姿势要求：{pose}。"
+            "画面中只能有一条连续完整的婚纱，从胸口到裙摆自然连接。"
+            f"动作控制：{pose_mode_prompt}姿势要求：{pose}。"
+            f"拍摄场景：{scene_desc}。"
             f"一位{gender}，全身人像构图，脚和裙摆都在画面内，高清细节，柔光，电影质感。"
         )

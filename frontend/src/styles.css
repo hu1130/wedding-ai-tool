@@ -377,6 +377,36 @@ h1 {
   margin-top: 18px;
 }
 
+.pose-group-list {
+  display: grid;
+  gap: 12px;
+}
+
+.pose-group {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(226, 221, 213, 0.86);
+  background: rgba(255, 253, 249, 0.52);
+}
+
+.pose-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pose-group-head strong {
+  font-size: 14px;
+}
+
+.pose-group-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .demo-card {
   min-height: 86px;
   margin-bottom: 18px;
@@ -431,6 +461,10 @@ h1 {
 
 .pose-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pose-card {
+  min-height: 96px;
 }
 
 .scene-card {
@@ -1164,7 +1198,8 @@ h1 {
 
   .demo-card,
   .comparison-heading,
-  .version-strip {
+  .version-strip,
+  .pose-group-head {
     align-items: flex-start;
     flex-direction: column;
   }

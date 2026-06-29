@@ -41,6 +41,7 @@ class Task:
         resolution: str = "1k",
         face_swap: bool = False,
         pose: str = "保持原姿势",
+        pose_mode: str = "stable",
         preserve_face: bool = True,
         generation_mode: str = "stable",
         parent_task_id: Optional[str] = None,
@@ -58,6 +59,7 @@ class Task:
         self.resolution = resolution
         self.face_swap = face_swap
         self.pose = pose
+        self.pose_mode = pose_mode
         self.preserve_face = preserve_face
         self.generation_mode = generation_mode
         self.parent_task_id = parent_task_id
@@ -87,6 +89,7 @@ class Task:
             "resolution": self.resolution,
             "face_swap": self.face_swap,
             "pose": self.pose,
+            "pose_mode": self.pose_mode,
             "preserve_face": self.preserve_face,
             "generation_mode": self.generation_mode,
             "parent_task_id": self.parent_task_id,
@@ -121,6 +124,7 @@ class Task:
             resolution=data.get("resolution", "1k"),
             face_swap=data.get("face_swap", False),
             pose=data.get("pose", "保持原姿势"),
+            pose_mode=data.get("pose_mode", "stable"),
             preserve_face=data.get("preserve_face", True),
             generation_mode=data.get("generation_mode", "stable"),
             parent_task_id=data.get("parent_task_id"),

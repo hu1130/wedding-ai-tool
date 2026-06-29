@@ -20,6 +20,7 @@ import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useState } fro
 
 type UploadSlot = "model" | "dress" | "face";
 type TaskStatus = "pending" | "processing" | "completed" | "failed";
+type PoseMode = "stable" | "light" | "experimental";
 
 type Task = {
   task_id: string;
@@ -34,6 +35,7 @@ type Task = {
   resolution: string;
   face_swap: boolean;
   pose?: string;
+  pose_mode?: PoseMode;
   preserve_face?: boolean;
   generation_mode?: "stable" | "creative";
   parent_task_id?: string | null;
@@ -72,15 +74,25 @@ const scenes = [
 ];
 
 const poses = [
-  { value: "保持原姿势", label: "保持原姿势", tone: "保脸更稳" },
-  { value: "正面站姿，双臂自然下垂", label: "正面站姿", tone: "商品展示" },
-  { value: "微侧身站姿，一只手轻扶裙摆", label: "手扶裙摆", tone: "婚纱氛围" },
-  { value: "轻微行走感，裙摆自然展开", label: "行走感", tone: "动态大片" },
-  { value: "回眸微笑，身体轻微侧转", label: "回眸", tone: "情绪表达" },
-  { value: "坐姿，裙摆自然铺开", label: "坐姿", tone: "画面丰富" },
+  { value: "保持原姿势", label: "保持原姿势", tone: "保脸保款", mode: "stable" as const, demoSafe: true },
+  { value: "正面站姿，双臂自然下垂", label: "正面站姿", tone: "轻动作", mode: "light" as const, demoSafe: true },
+  { value: "轻微行走感，裙摆自然展开", label: "行走感", tone: "轻动作", mode: "light" as const, demoSafe: true },
+  { value: "微侧身站姿，一只手轻扶裙摆", label: "手扶裙摆", tone: "实验动作", mode: "experimental" as const, demoSafe: false },
+  { value: "回眸微笑，身体轻微侧转", label: "回眸", tone: "实验动作", mode: "experimental" as const, demoSafe: false },
+  { value: "坐姿，裙摆自然铺开", label: "坐姿", tone: "实验动作", mode: "experimental" as const, demoSafe: false },
 ];
 
 const demoScenes = new Set(scenes.filter((item) => item.demoSafe).map((item) => item.value));
+const poseGroups: { mode: PoseMode; title: string; hint: string }[] = [
+  { mode: "stable", title: "稳妥动作", hint: "优先保脸和婚纱款式" },
+  { mode: "light", title: "轻动作", hint: "适合老板演示小幅变化" },
+  { mode: "experimental", title: "实验动作", hint: "动作更明显，建议多跑挑片" },
+];
+const poseModeCopy: Record<PoseMode, string> = {
+  stable: "稳妥动作",
+  light: "轻动作",
+  experimental: "实验动作",
+};
 
 const slotCopy: Record<UploadSlot, { title: string; subtitle: string; required: boolean }> = {
   model: {
@@ -151,6 +163,7 @@ const api = {
     resolution: string;
     face_swap: boolean;
     pose: string;
+    pose_mode: PoseMode;
     preserve_face: boolean;
     generation_mode: "stable" | "creative";
   }) {
@@ -236,7 +249,13 @@ export function App() {
   );
   const scenePrompt = scene === "自定义背景" ? customScenePrompt.trim() : "";
   const sceneSummary = scenePrompt ? `自定义背景：${scenePrompt}` : selectedScene.label;
+  const selectedPose = useMemo(
+    () => poses.find((item) => item.value === pose) || poses[0],
+    [pose],
+  );
   const posePrompt = customPose.trim() || pose;
+  const poseMode: PoseMode = customPose.trim() ? "experimental" : selectedPose.mode;
+  const poseModeLabel = poseModeCopy[poseMode];
   const selectedVersions = useMemo(() => {
     if (!selectedTask) return [];
     const rootId = taskSeriesRoot(selectedTask);
@@ -335,6 +354,7 @@ export function App() {
         resolution,
         face_swap: false,
         pose: posePrompt,
+        pose_mode: poseMode,
         preserve_face: preserveFace,
         generation_mode: generationMode,
       });
@@ -520,27 +540,44 @@ export function App() {
 
           <div className="setting-block pose-block">
             <label>动作 / 姿势</label>
-            <div className="scene-grid pose-grid">
-              {poses.map((item) => (
-                <button
-                  className={[
-                    "scene-card",
-                    item.value === pose && !customPose.trim() ? "active" : "",
-                    demoMode && item.value !== "保持原姿势" ? "disabled" : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  key={item.value}
-                  onClick={() => {
-                    if (demoMode && item.value !== "保持原姿势") return;
-                    setPose(item.value);
-                    setCustomPose("");
-                  }}
-                  disabled={demoMode && item.value !== "保持原姿势"}
-                >
-                  <strong>{item.label}</strong>
-                  <span>{item.tone}</span>
-                </button>
+            <div className="pose-group-list">
+              {poseGroups.map((group) => (
+                <div className="pose-group" key={group.mode}>
+                  <div className="pose-group-head">
+                    <strong>{group.title}</strong>
+                    <span>{group.hint}</span>
+                  </div>
+                  <div className="scene-grid pose-grid">
+                    {poses
+                      .filter((item) => item.mode === group.mode)
+                      .map((item) => (
+                        <button
+                          className={[
+                            "scene-card",
+                            "pose-card",
+                            item.value === pose && !customPose.trim() ? "active" : "",
+                            demoMode && !item.demoSafe ? "disabled" : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
+                          key={item.value}
+                          onClick={() => {
+                            if (demoMode && !item.demoSafe) {
+                              setToast("老板演示模式只开放保持原姿势、正面站姿和行走感");
+                              return;
+                            }
+                            setPose(item.value);
+                            setCustomPose("");
+                          }}
+                          disabled={demoMode && !item.demoSafe}
+                        >
+                          <strong>{item.label}</strong>
+                          <span>{item.tone}</span>
+                          <em>{poseModeCopy[item.mode]}</em>
+                        </button>
+                      ))}
+                  </div>
+                </div>
               ))}
             </div>
             <input
@@ -636,7 +673,7 @@ export function App() {
             <div>
               <span>{demoMode ? "当前方案 · 演示锁定" : "当前方案"}</span>
               <strong>
-                {sceneSummary} / {resolution.toUpperCase()} / {posePrompt} /{" "}
+                {sceneSummary} / {resolution.toUpperCase()} / {poseModeLabel} / {posePrompt} /{" "}
                 {generationMode === "stable" ? "保款式稳定" : "自由重绘"} / {preserveFace ? "保脸优先" : "自由生成"}
               </strong>
             </div>
@@ -851,6 +888,9 @@ function ResultDialog({
           </span>
           <span>
             动作 <strong>{task.pose || "保持原姿势"}</strong>
+          </span>
+          <span>
+            动作模式 <strong>{poseModeCopy[task.pose_mode || "stable"]}</strong>
           </span>
           <span>
             规格 <strong>{task.resolution.toUpperCase()}</strong>
