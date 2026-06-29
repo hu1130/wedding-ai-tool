@@ -67,6 +67,42 @@ def _cleanup_task_files(task: Task) -> dict:
     return {"removed_files": removed_files, "removed_dirs": removed_dirs}
 
 
+def _task_series_root(task: Task) -> str:
+    return task.parent_task_id or task.task_id
+
+
+def _next_rerun_index(root_task_id: str) -> int:
+    series = [
+        task for task in Task.list_internal()
+        if task.task_id == root_task_id or task.parent_task_id == root_task_id
+    ]
+    if not series:
+        return 2
+    return max((getattr(task, "rerun_index", 1) or 1 for task in series), default=1) + 1
+
+
+def _clone_task_for_rerun(source: Task) -> Task:
+    root_task_id = _task_series_root(source)
+    next_index = _next_rerun_index(root_task_id)
+    root_task = Task.get(root_task_id)
+    base_name = (root_task.name if root_task else source.name) or f"任务_{root_task_id}"
+
+    return Task(
+        name=f"{base_name} V{next_index}",
+        model_file=source.model_file,
+        dress_file=source.dress_file,
+        face_file=source.face_file,
+        scene=source.scene,
+        resolution=source.resolution,
+        face_swap=source.face_swap,
+        pose=source.pose,
+        preserve_face=source.preserve_face,
+        generation_mode=source.generation_mode,
+        parent_task_id=root_task_id,
+        rerun_index=next_index,
+    )
+
+
 class CreateTaskRequest(BaseModel):
     name: Optional[str] = None
     model_file: str
@@ -158,6 +194,29 @@ async def get_task(task_id: str):
     if not task:
         raise HTTPException(404, detail="任务不存在")
     return {"success": True, "task": task.to_public_dict()}
+
+
+@router.post("/task/{task_id}/rerun")
+async def rerun_task(task_id: str):
+    """基于同一组素材和参数重跑一个新版本"""
+    task = Task.get(task_id)
+    if not task:
+        raise HTTPException(404, detail="任务不存在")
+
+    if task.status.value == "processing":
+        raise HTTPException(409, detail="任务正在生成中，请完成或失败后再重跑")
+
+    rerun = _clone_task_for_rerun(task)
+    rerun.save()
+    await enqueue_task(rerun.task_id)
+
+    return {
+        "success": True,
+        "task_id": rerun.task_id,
+        "status": rerun.status.value,
+        "parent_task_id": rerun.parent_task_id,
+        "rerun_index": rerun.rerun_index,
+    }
 
 
 @router.delete("/task/{task_id}")

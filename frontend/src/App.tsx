@@ -35,6 +35,8 @@ type Task = {
   pose?: string;
   preserve_face?: boolean;
   generation_mode?: "stable" | "creative";
+  parent_task_id?: string | null;
+  rerun_index?: number;
   output_files: Record<string, boolean>;
   error_message: string;
   created_at: string;
@@ -160,6 +162,11 @@ const api = {
     const data = await readApiJson<{ tasks: Task[] }>(response, "任务列表获取失败");
     return data.tasks as Task[];
   },
+  async rerunTask(taskId: string) {
+    const response = await fetch(`/api/task/${taskId}/rerun`, { method: "POST" });
+    const data = await readApiJson<{ task_id: string; rerun_index: number }>(response, "重跑任务失败");
+    return data;
+  },
   async deleteTask(taskId: string) {
     const response = await fetch(`/api/task/${taskId}`, { method: "DELETE" });
     return readApiJson<{ removed_dirs: number; removed_files: number; success: boolean }>(
@@ -182,6 +189,14 @@ function taskDisplayName(task: Task) {
   return name;
 }
 
+function taskSeriesRoot(task: Task) {
+  return task.parent_task_id || task.task_id;
+}
+
+function taskVersionLabel(task: Task) {
+  return `V${task.rerun_index || 1}`;
+}
+
 export function App() {
   const [uploads, setUploads] = useState<Record<UploadSlot, UploadState>>({
     model: emptyUpload,
@@ -201,12 +216,20 @@ export function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+  const [rerunningTaskId, setRerunningTaskId] = useState<string | null>(null);
 
   const selectedScene = useMemo(
     () => scenes.find((item) => item.value === scene) || scenes[0],
     [scene],
   );
   const posePrompt = customPose.trim() || pose;
+  const selectedVersions = useMemo(() => {
+    if (!selectedTask) return [];
+    const rootId = taskSeriesRoot(selectedTask);
+    return tasks
+      .filter((task) => task.task_id === rootId || task.parent_task_id === rootId)
+      .sort((a, b) => (a.rerun_index || 1) - (b.rerun_index || 1));
+  }, [selectedTask, tasks]);
 
   const fetchTasks = useCallback(async () => {
     try {
@@ -300,6 +323,27 @@ export function App() {
       setToast(error instanceof Error ? error.message : "创建任务失败");
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleRerunTask(task: Task) {
+    if (task.status === "processing") {
+      setToast("任务正在生成中，完成或失败后再重跑");
+      return;
+    }
+
+    setRerunningTaskId(task.task_id);
+    try {
+      const result = await api.rerunTask(task.task_id);
+      setToast(`已创建 V${result.rerun_index}，正在生成`);
+      const nextTasks = await api.tasks();
+      setTasks(nextTasks);
+      const nextTask = nextTasks.find((item) => item.task_id === result.task_id);
+      if (nextTask) setSelectedTask(nextTask);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "重跑任务失败");
+    } finally {
+      setRerunningTaskId(null);
     }
   }
 
@@ -598,7 +642,10 @@ export function App() {
                       {statusCopy[task.status]}
                     </span>
                     <div className="task-main">
-                      <strong>{taskDisplayName(task)}</strong>
+                      <strong>
+                        {taskDisplayName(task)}
+                        <span className="version-badge">{taskVersionLabel(task)}</span>
+                      </strong>
                       <span>
                         {task.scene} / {task.resolution.toUpperCase()} / 进度 {Math.round(task.progress)}%
                       </span>
@@ -627,9 +674,13 @@ export function App() {
       {selectedTask && (
         <ResultDialog
           deleting={deletingTaskId === selectedTask.task_id}
+          rerunning={rerunningTaskId === selectedTask.task_id}
           task={selectedTask}
+          versions={selectedVersions}
           onClose={() => setSelectedTask(null)}
           onDelete={handleDeleteTask}
+          onRerun={handleRerunTask}
+          onSelectVersion={setSelectedTask}
         />
       )}
 
@@ -715,14 +766,22 @@ function UploadCard({
 
 function ResultDialog({
   deleting,
+  rerunning,
   task,
+  versions,
   onClose,
   onDelete,
+  onRerun,
+  onSelectVersion,
 }: {
   deleting: boolean;
+  rerunning: boolean;
   task: Task;
+  versions: Task[];
   onClose: () => void;
   onDelete: (task: Task) => void;
+  onRerun: (task: Task) => void;
+  onSelectVersion: (task: Task) => void;
 }) {
   const comparisonImages = [
     { key: "model", label: "模特原图", src: `/api/task/${task.task_id}/input/model` },
@@ -749,6 +808,28 @@ function ResultDialog({
             <X size={22} />
           </button>
         </div>
+
+        {versions.length > 0 && (
+          <div className="version-strip">
+            <div>
+              <span className="section-kicker">版本挑片</span>
+              <strong>同一组素材可以多次重跑，保留最好的一版</strong>
+            </div>
+            <div className="version-list">
+              {versions.map((version) => (
+                <button
+                  className={version.task_id === task.task_id ? "version-chip active" : "version-chip"}
+                  key={version.task_id}
+                  onClick={() => onSelectVersion(version)}
+                  type="button"
+                >
+                  <span>{taskVersionLabel(version)}</span>
+                  <small>{statusCopy[version.status]}</small>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {task.status === "failed" ? (
           <div className="error-box">
@@ -804,6 +885,15 @@ function ResultDialog({
               下载最终图
             </a>
           )}
+          <button
+            className="rerun-button"
+            disabled={rerunning || task.status === "processing"}
+            onClick={() => onRerun(task)}
+            type="button"
+          >
+            {rerunning ? <Loader2 size={18} className="spin" /> : <RefreshCw size={18} />}
+            重跑一版
+          </button>
           <button
             className="delete-button"
             disabled={deleting || task.status === "processing"}

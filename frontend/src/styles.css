@@ -704,6 +704,25 @@ h1 {
   gap: 5px;
 }
 
+.task-main strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.version-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  color: var(--gold);
+  background: #fff4dc;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .task-main span {
   color: var(--muted);
   font-size: 13px;
@@ -765,6 +784,65 @@ h1 {
   background: #f4eee6;
   color: var(--ink);
   cursor: pointer;
+}
+
+.version-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(248, 244, 238, 0.64);
+}
+
+.version-strip strong {
+  display: block;
+  margin-top: 5px;
+  font-size: 14px;
+}
+
+.version-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.version-chip {
+  min-width: 72px;
+  min-height: 44px;
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: var(--ink);
+  background: #fffdf9;
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.version-chip span {
+  font-weight: 850;
+}
+
+.version-chip small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.version-chip.active {
+  color: #fffdf9;
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.version-chip.active small {
+  color: #d8cbbb;
 }
 
 .comparison-strip {
@@ -878,6 +956,30 @@ h1 {
   background: #fff8f6;
   border: 1px solid rgba(184, 74, 67, 0.28);
   cursor: pointer;
+}
+
+.rerun-button {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 18px;
+  border-radius: 8px;
+  color: var(--ink);
+  background: #fffdf9;
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.rerun-button:hover {
+  border-color: var(--gold);
+  background: #fff8ef;
+}
+
+.rerun-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .delete-button:hover {
@@ -994,9 +1096,15 @@ h1 {
   }
 
   .demo-card,
-  .comparison-heading {
+  .comparison-heading,
+  .version-strip {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .version-list {
+    justify-content: flex-start;
+    width: 100%;
   }
 
 }
