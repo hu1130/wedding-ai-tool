@@ -13,6 +13,14 @@ from backend.utils.composite import composite_subject_on_background
 from backend.utils.garment import is_floor_length_gown
 
 
+FACE_ARTIFACT_NEGATIVE_PROMPT = (
+    "，贴脸，抠图头像，头像像贴纸，脸部硬边，头发边缘硬边，脸部边缘光晕，"
+    "脸和脖子断裂，头身不连接，头部比例过大，脸部光线不一致，肤色不一致，"
+    "pasted face, cutout head, sticker face, hard face edge, halo around head, "
+    "disconnected neck, floating head, mismatched face lighting, mismatched skin tone"
+)
+
+
 class TaskPipeline:
     """任务流水线：AI试衣 → 场景生成"""
 
@@ -156,6 +164,7 @@ class TaskPipeline:
                 "短款礼服，改变婚纱廓形，换脸，脸部变形，扭曲，变形，模糊，"
                 "低质量，水印，文字"
             )
+            negative_prompt += FACE_ARTIFACT_NEGATIVE_PROMPT
             result = await self.wanx.generate_scene(
                 input_image_path=current_image,
                 prompt=prompt,
@@ -182,6 +191,7 @@ class TaskPipeline:
                 "错误领口，错误腰线，改变婚纱款式，换脸，脸部变形，扭曲，"
                 "低质量，水印，文字，logo"
             )
+            negative_prompt += FACE_ARTIFACT_NEGATIVE_PROMPT
             return await self.wanx.generate_scene(
                 input_image_path=task.model_file,
                 prompt=prompt,

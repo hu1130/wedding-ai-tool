@@ -226,6 +226,14 @@ class WanxSceneService:
 
         return None
 
+    @staticmethod
+    def _face_blend_prompt() -> str:
+        return (
+            "保留人物身份相似度，但必须把脸、脖子、头发边缘重新融入最终场景的光线和阴影；"
+            "面部肤色、亮度、清晰度、颗粒感和背景光源一致，头部与脖子肩膀自然连接，"
+            "发丝边缘柔和真实，不能像抠图头像或贴纸。"
+        )
+
     def build_scene_prompt(
         self,
         scene_name: str,
@@ -241,6 +249,7 @@ class WanxSceneService:
             if preserve_face
             else ""
         )
+        face_blend_prompt = self._face_blend_prompt() if preserve_face else ""
         floor_length_prompt = (
             "必须呈现长款拖地婚纱，裙摆从腰部自然展开并覆盖双腿直到地面，"
             "保留大裙摆、拖尾和落地长度；如果当前图片里裙子是及膝裙或露腿，"
@@ -251,6 +260,7 @@ class WanxSceneService:
         return (
             f"婚纱照，{scene_desc}，一位{gender}穿着当前图片中的白色婚纱，"
             f"{face_prompt}"
+            f"{face_blend_prompt}"
             f"严格保留原有婚纱的款式、领口、腰线、裙长、裙摆轮廓和蕾丝纹理，"
             f"不要把长款婚纱改成短裙，不要改变服装结构，"
             f"{floor_length_prompt}"
@@ -272,9 +282,10 @@ class WanxSceneService:
             if preserve_face
             else ""
         )
+        face_blend_prompt = self._face_blend_prompt() if preserve_face else ""
         return (
             "根据两张参考图生成一张真实婚纱照。"
-            f"第一张图是模特参考，{face_prompt}保留自然站姿和身体比例；"
+            f"第一张图是模特参考，{face_prompt}{face_blend_prompt}保留自然站姿和身体比例；"
             "第二张图是唯一的婚纱款式参考，必须让模特穿第二张图里的同一件婚纱，"
             "保留心形抹胸领口、腰线、大 A 字裙摆、蕾丝纹理、拖地裙长和裙尾宽度。"
             "必须完全替换第一张图里的原服装，不要保留原短裙，不要在短裙外面再加一层长裙，"
