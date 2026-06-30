@@ -24,7 +24,10 @@ ACTION_POSE_MODES = {"light", "experimental"}
 
 
 def _is_action_pose(task: Task) -> bool:
-    return getattr(task, "pose_mode", "stable") in ACTION_POSE_MODES
+    return (
+        bool(getattr(task, "pose_reference_file", None))
+        or getattr(task, "pose_mode", "stable") in ACTION_POSE_MODES
+    )
 
 
 class TaskPipeline:
@@ -204,6 +207,7 @@ class TaskPipeline:
                 pose_mode=task.pose_mode,
                 force_floor_length=force_floor_length,
                 scene_prompt=task.scene_prompt,
+                has_pose_reference=bool(task.pose_reference_file),
             )
             negative_prompt = (
                 "两条裙子，双层裙，短裙外面套长裙，上下两件裙子，保留原短裙，"
@@ -212,13 +216,17 @@ class TaskPipeline:
                 "低质量，水印，文字，logo"
             )
             negative_prompt += FACE_ARTIFACT_NEGATIVE_PROMPT
+            reference_image_paths = [task.dress_file]
+            if task.pose_reference_file:
+                reference_image_paths.append(task.pose_reference_file)
+
             return await self.wanx.generate_scene(
                 input_image_path=task.model_file,
                 prompt=prompt,
                 output_dir=output_dir,
                 resolution=task.resolution,
                 negative_prompt=negative_prompt,
-                reference_image_paths=[task.dress_file],
+                reference_image_paths=reference_image_paths,
             )
         except Exception as e:
             print(f"[婚纱参考生成失败] {e}")

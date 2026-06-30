@@ -18,9 +18,10 @@ import {
 } from "lucide-react";
 import { ChangeEvent, DragEvent, useCallback, useEffect, useMemo, useState } from "react";
 
-type UploadSlot = "model" | "dress" | "face";
+type UploadSlot = "model" | "dress" | "face" | "poseReference";
 type TaskStatus = "pending" | "processing" | "completed" | "failed";
 type PoseMode = "stable" | "light" | "experimental";
+type ClothingType = "wedding_gown";
 
 type Task = {
   task_id: string;
@@ -30,6 +31,8 @@ type Task = {
   model_file?: string;
   dress_file?: string;
   face_file?: string | null;
+  pose_reference_file?: string | null;
+  clothing_type?: ClothingType;
   scene: string;
   scene_prompt?: string;
   resolution: string;
@@ -93,6 +96,9 @@ const poseModeCopy: Record<PoseMode, string> = {
   light: "轻动作",
   experimental: "实验动作",
 };
+const clothingTypeCopy: Record<ClothingType, string> = {
+  wedding_gown: "婚纱",
+};
 
 const slotCopy: Record<UploadSlot, { title: string; subtitle: string; required: boolean }> = {
   model: {
@@ -108,6 +114,11 @@ const slotCopy: Record<UploadSlot, { title: string; subtitle: string; required: 
   face: {
     title: "客人面部照",
     subtitle: "换脸功能后续开启，当前可先留空",
+    required: false,
+  },
+  poseReference: {
+    title: "动作参考图",
+    subtitle: "可选；用于手扶裙摆、坐姿、回眸等动作控制",
     required: false,
   },
 };
@@ -158,6 +169,8 @@ const api = {
     model_file: string;
     dress_file: string;
     face_file?: string | null;
+    pose_reference_file?: string | null;
+    clothing_type: ClothingType;
     scene: string;
     scene_prompt?: string;
     resolution: string;
@@ -226,7 +239,9 @@ export function App() {
     model: emptyUpload,
     dress: emptyUpload,
     face: emptyUpload,
+    poseReference: emptyUpload,
   });
+  const [clothingType] = useState<ClothingType>("wedding_gown");
   const [scene, setScene] = useState("海边");
   const [customScenePrompt, setCustomScenePrompt] = useState("");
   const [pose, setPose] = useState("保持原姿势");
@@ -349,6 +364,8 @@ export function App() {
         model_file: modelFile,
         dress_file: dressFile,
         face_file: uploads.face.fileId,
+        pose_reference_file: uploads.poseReference.fileId,
+        clothing_type: clothingType,
         scene,
         scene_prompt: scenePrompt,
         resolution,
@@ -500,6 +517,17 @@ export function App() {
             >
               {demoMode ? "演示中" : "自定义"}
             </button>
+          </div>
+
+          <div className="setting-line">
+            <div>
+              <label>服装类型</label>
+              <p>当前生成链路按婚纱优化，晚礼服、旗袍、西装后续单独开放提示词规则。</p>
+            </div>
+            <div className="clothing-control">
+              <span>{clothingTypeCopy[clothingType]}</span>
+              <small>当前开放</small>
+            </div>
           </div>
 
           <div className="setting-block">
@@ -673,7 +701,8 @@ export function App() {
             <div>
               <span>{demoMode ? "当前方案 · 演示锁定" : "当前方案"}</span>
               <strong>
-                {sceneSummary} / {resolution.toUpperCase()} / {poseModeLabel} / {posePrompt} /{" "}
+                {clothingTypeCopy[clothingType]} / {sceneSummary} / {resolution.toUpperCase()} / {poseModeLabel} / {posePrompt} /{" "}
+                {uploads.poseReference.fileId ? "动作参考图已加入" : "无动作参考图"} /{" "}
                 {generationMode === "stable" ? "保款式稳定" : "自由重绘"} / {preserveFace ? "保脸优先" : "自由生成"}
               </strong>
             </div>
@@ -859,6 +888,9 @@ function ResultDialog({
   const comparisonImages = [
     { key: "model", label: "模特原图", src: `/api/task/${task.task_id}/input/model` },
     { key: "dress", label: "婚纱款式", src: `/api/task/${task.task_id}/input/dress` },
+    ...(task.pose_reference_file
+      ? [{ key: "pose_reference", label: "动作参考", src: `/api/task/${task.task_id}/input/pose_reference` }]
+      : []),
     { key: "final", label: "最终交付图", src: `/api/task/${task.task_id}/result` },
   ];
   const imageSteps = [
@@ -884,6 +916,9 @@ function ResultDialog({
 
         <div className="task-config-strip">
           <span>
+            服装 <strong>{clothingTypeCopy[task.clothing_type || "wedding_gown"]}</strong>
+          </span>
+          <span>
             背景 <strong>{sceneInfo}</strong>
           </span>
           <span>
@@ -900,6 +935,9 @@ function ResultDialog({
           </span>
           <span>
             人脸 <strong>{task.preserve_face ? "保脸优先" : "自由生成"}</strong>
+          </span>
+          <span>
+            动作参考 <strong>{task.pose_reference_file ? "已使用" : "未使用"}</strong>
           </span>
         </div>
 

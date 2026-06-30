@@ -65,7 +65,7 @@ async def get_step_result(task_id: str, step_name: str):
 
 @router.get("/task/{task_id}/input/{input_name}")
 async def get_input_image(task_id: str, input_name: str):
-    """获取任务输入素材图片。input_name: model / dress / face"""
+    """获取任务输入素材图片。input_name: model / dress / face / pose_reference"""
     task = Task.get(task_id)
     if not task:
         raise HTTPException(404, detail="任务不存在")
@@ -74,6 +74,7 @@ async def get_input_image(task_id: str, input_name: str):
         "model": task.model_file,
         "dress": task.dress_file,
         "face": task.face_file,
+        "pose_reference": task.pose_reference_file,
     }
     if input_name not in input_paths:
         raise HTTPException(404, detail="输入素材不存在")

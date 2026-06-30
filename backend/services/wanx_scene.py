@@ -286,6 +286,7 @@ class WanxSceneService:
         pose_mode: str = "stable",
         force_floor_length: bool = False,
         scene_prompt: Optional[str] = None,
+        has_pose_reference: bool = False,
     ) -> str:
         """Build prompt for model + product-gown multi-reference generation."""
         scene_desc = self._scene_description(scene_name, scene_prompt)
@@ -306,11 +307,18 @@ class WanxSceneService:
             if force_floor_length
             else "保留第二张图原本的裙长、裙摆体量和服装结构。"
         )
+        pose_reference_prompt = (
+            "第三张图是动作参考，只参考身体朝向、手臂位置、手与裙摆关系和整体姿态；"
+            "不要复制第三张图的人脸、发型、服装、背景、颜色或人物身份。"
+            if has_pose_reference
+            else ""
+        )
         return (
-            "根据两张参考图生成一张真实婚纱照。"
+            f"根据{'三' if has_pose_reference else '两'}张参考图生成一张真实婚纱照。"
             f"第一张图是模特参考，{face_prompt}{face_blend_prompt}保留自然站姿和身体比例；"
             "第二张图是唯一的婚纱款式参考，必须让模特穿第二张图里的同一件婚纱，"
             "保留原始领口、腰线、裙摆轮廓、面料质感、蕾丝或纱面纹理。"
+            f"{pose_reference_prompt}"
             f"{length_prompt}"
             "必须完全替换第一张图里的原服装，不要保留原短裙，不要在短裙外面再加一层长裙，"
             "画面中只能有一条连续完整的婚纱，从胸口到裙摆自然连接。"

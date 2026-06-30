@@ -36,6 +36,8 @@ class Task:
         model_file: str = "",
         dress_file: str = "",
         face_file: Optional[str] = None,
+        pose_reference_file: Optional[str] = None,
+        clothing_type: str = "wedding_gown",
         scene: str = "海边",
         scene_prompt: str = "",
         resolution: str = "1k",
@@ -54,6 +56,8 @@ class Task:
         self.model_file = model_file
         self.dress_file = dress_file
         self.face_file = face_file
+        self.pose_reference_file = pose_reference_file
+        self.clothing_type = clothing_type
         self.scene = scene
         self.scene_prompt = scene_prompt
         self.resolution = resolution
@@ -84,6 +88,8 @@ class Task:
             "model_file": self.model_file,
             "dress_file": self.dress_file,
             "face_file": self.face_file,
+            "pose_reference_file": self.pose_reference_file,
+            "clothing_type": self.clothing_type,
             "scene": self.scene,
             "scene_prompt": self.scene_prompt,
             "resolution": self.resolution,
@@ -103,7 +109,7 @@ class Task:
 
     def to_public_dict(self):
         data = self.to_dict()
-        for key in ["model_file", "dress_file", "face_file"]:
+        for key in ["model_file", "dress_file", "face_file", "pose_reference_file"]:
             if data.get(key):
                 data[key] = os.path.basename(data[key])
         data["output_files"] = {
@@ -119,6 +125,8 @@ class Task:
             model_file=data.get("model_file", ""),
             dress_file=data.get("dress_file", ""),
             face_file=data.get("face_file"),
+            pose_reference_file=data.get("pose_reference_file"),
+            clothing_type=data.get("clothing_type", "wedding_gown"),
             scene=data.get("scene", "海边"),
             scene_prompt=data.get("scene_prompt", ""),
             resolution=data.get("resolution", "1k"),

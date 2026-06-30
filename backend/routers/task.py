@@ -18,6 +18,7 @@ MAX_SCENE_PROMPT_LENGTH = 240
 POSE_MODES = {"stable", "light", "experimental"}
 STABLE_POSE = "保持原姿势"
 LIGHT_POSES = {"正面站姿，双臂自然下垂", "轻微行走感，裙摆自然展开"}
+CLOTHING_TYPES = {"wedding_gown"}
 
 
 def _is_inside(path: str, root: str) -> bool:
@@ -46,7 +47,7 @@ def _remove_dir_if_safe(path: str, root: str) -> bool:
 def _remaining_input_paths() -> set[str]:
     paths: set[str] = set()
     for task in Task.list_internal():
-        for candidate in [task.model_file, task.dress_file, task.face_file]:
+        for candidate in [task.model_file, task.dress_file, task.face_file, task.pose_reference_file]:
             if candidate:
                 paths.add(os.path.abspath(candidate))
     return paths
@@ -65,7 +66,7 @@ def _cleanup_task_files(task: Task) -> dict:
                 removed_files += 1
 
     remaining_inputs = _remaining_input_paths()
-    for path in [task.model_file, task.dress_file, task.face_file]:
+    for path in [task.model_file, task.dress_file, task.face_file, task.pose_reference_file]:
         if path and os.path.abspath(path) not in remaining_inputs:
             if _remove_file_if_safe(path, settings.upload_dir):
                 removed_files += 1
@@ -98,6 +99,8 @@ def _clone_task_for_rerun(source: Task) -> Task:
         model_file=source.model_file,
         dress_file=source.dress_file,
         face_file=source.face_file,
+        pose_reference_file=source.pose_reference_file,
+        clothing_type=source.clothing_type,
         scene=source.scene,
         scene_prompt=source.scene_prompt,
         resolution=source.resolution,
@@ -116,6 +119,8 @@ class CreateTaskRequest(BaseModel):
     model_file: str
     dress_file: str
     face_file: Optional[str] = None
+    pose_reference_file: Optional[str] = None
+    clothing_type: str = "wedding_gown"
     scene: str = "海边"
     scene_prompt: Optional[str] = None
     resolution: str = "1k"
@@ -151,6 +156,9 @@ def _build_task(req: CreateTaskRequest) -> Task:
     if req.generation_mode not in {"stable", "creative"}:
         raise HTTPException(400, detail="生成模式只支持 stable 或 creative")
 
+    if req.clothing_type not in CLOTHING_TYPES:
+        raise HTTPException(400, detail="当前版本只开放婚纱模式，其他服装类型后续扩展")
+
     if pose_mode not in POSE_MODES:
         raise HTTPException(400, detail="动作模式只支持 stable、light 或 experimental")
 
@@ -161,6 +169,9 @@ def _build_task(req: CreateTaskRequest) -> Task:
         model_file = resolve_upload_path(req.model_file)
         dress_file = resolve_upload_path(req.dress_file)
         face_file = resolve_upload_path(req.face_file) if req.face_file else None
+        pose_reference_file = (
+            resolve_upload_path(req.pose_reference_file) if req.pose_reference_file else None
+        )
     except FileNotFoundError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
     except ValueError as exc:
@@ -171,6 +182,8 @@ def _build_task(req: CreateTaskRequest) -> Task:
         model_file=model_file,
         dress_file=dress_file,
         face_file=face_file,
+        pose_reference_file=pose_reference_file,
+        clothing_type=req.clothing_type,
         scene=req.scene,
         scene_prompt=scene_prompt,
         resolution=req.resolution,
