@@ -1,0 +1,182 @@
+{
+  "name": "wedding-v1",
+  "purpose": "固定测试集，用于回归测试婚纱款式还原、人脸稳定、背景和动作可控性。",
+  "version": 1,
+  "assets": {
+    "models": {
+      "model_clean_front": "models/model-01-clean-front.png",
+      "model_side_pose": "models/model-02-side-pose.png",
+      "model_dark_background": "models/model-03-dark-background.png"
+    },
+    "dresses": {
+      "dress_a_line_sweetheart": "dresses/dress-01-a-line-sweetheart.png",
+      "dress_mermaid_lace": "dresses/dress-02-mermaid-lace.png",
+      "dress_long_sleeve_ball_gown": "dresses/dress-03-long-sleeve-ball-gown.png"
+    },
+    "pose_refs": {
+      "pose_front_stand": "pose_refs/pose-01-front-stand.png",
+      "pose_walking": "pose_refs/pose-02-walking.png",
+      "pose_hand_skirt": "pose_refs/pose-03-hand-skirt.png",
+      "pose_seated_skirt": "pose_refs/pose-04-seated-skirt.png"
+    }
+  },
+  "scenarios": [
+    {
+      "id": "WED-001",
+      "name": "基础稳定-正面模特-A字拖地婚纱",
+      "model": "model_clean_front",
+      "dress": "dress_a_line_sweetheart",
+      "scene": "影棚",
+      "pose": "保持原姿势",
+      "pose_mode": "stable",
+      "pose_ref": null,
+      "resolution": "1k",
+      "risk": "low",
+      "expected": "人脸稳定，婚纱保持拖地大裙摆，不出现两条裙子。"
+    },
+    {
+      "id": "WED-002",
+      "name": "基础稳定-侧身模特-鱼尾蕾丝婚纱",
+      "model": "model_side_pose",
+      "dress": "dress_mermaid_lace",
+      "scene": "影棚",
+      "pose": "保持原姿势",
+      "pose_mode": "stable",
+      "pose_ref": null,
+      "resolution": "1k",
+      "risk": "medium",
+      "expected": "鱼尾轮廓和蕾丝质感应保留，不能变成普通直筒裙。"
+    },
+    {
+      "id": "WED-003",
+      "name": "基础稳定-深色背景模特-长袖蓬裙婚纱",
+      "model": "model_dark_background",
+      "dress": "dress_long_sleeve_ball_gown",
+      "scene": "影棚",
+      "pose": "保持原姿势",
+      "pose_mode": "stable",
+      "pose_ref": null,
+      "resolution": "1k",
+      "risk": "medium",
+      "expected": "长袖、上身蕾丝和大裙摆应保留，背景不应影响人脸。"
+    },
+    {
+      "id": "WED-004",
+      "name": "背景稳定-海边日落",
+      "model": "model_clean_front",
+      "dress": "dress_a_line_sweetheart",
+      "scene": "海边",
+      "pose": "保持原姿势",
+      "pose_mode": "stable",
+      "pose_ref": null,
+      "resolution": "1k",
+      "risk": "low",
+      "expected": "海边背景自然，人物和婚纱边缘不应像硬抠图。"
+    },
+    {
+      "id": "WED-005",
+      "name": "背景稳定-教堂",
+      "model": "model_clean_front",
+      "dress": "dress_long_sleeve_ball_gown",
+      "scene": "教堂",
+      "pose": "保持原姿势",
+      "pose_mode": "stable",
+      "pose_ref": null,
+      "resolution": "1k",
+      "risk": "low",
+      "expected": "教堂背景自然，婚纱仍为长袖蓬裙，脸部光线融合。"
+    },
+    {
+      "id": "WED-006",
+      "name": "背景稳定-花园",
+      "model": "model_side_pose",
+      "dress": "dress_mermaid_lace",
+      "scene": "花园",
+      "pose": "保持原姿势",
+      "pose_mode": "stable",
+      "pose_ref": null,
+      "resolution": "1k",
+      "risk": "medium",
+      "expected": "花园背景不应破坏鱼尾裙线条，人物比例正常。"
+    },
+    {
+      "id": "WED-007",
+      "name": "动作参考-正面站姿",
+      "model": "model_clean_front",
+      "dress": "dress_a_line_sweetheart",
+      "scene": "影棚",
+      "pose": "正面站姿，双臂自然下垂",
+      "pose_mode": "light",
+      "pose_ref": "pose_front_stand",
+      "resolution": "1k",
+      "risk": "low",
+      "expected": "动作接近正面站姿，不复制动作参考图的黑色衣服。"
+    },
+    {
+      "id": "WED-008",
+      "name": "动作参考-轻微行走",
+      "model": "model_clean_front",
+      "dress": "dress_a_line_sweetheart",
+      "scene": "海边",
+      "pose": "轻微行走感，裙摆自然展开",
+      "pose_mode": "light",
+      "pose_ref": "pose_walking",
+      "resolution": "1k",
+      "risk": "medium",
+      "expected": "能看到轻微步态或裙摆动态，婚纱仍完整拖地。"
+    },
+    {
+      "id": "WED-009",
+      "name": "动作参考-手扶裙摆",
+      "model": "model_side_pose",
+      "dress": "dress_mermaid_lace",
+      "scene": "教堂",
+      "pose": "微侧身站姿，一只手轻扶裙摆",
+      "pose_mode": "experimental",
+      "pose_ref": "pose_hand_skirt",
+      "resolution": "1k",
+      "risk": "high",
+      "expected": "手部尽量靠近裙摆，不应复制灰色参考裙，也不应长出多余手指。"
+    },
+    {
+      "id": "WED-010",
+      "name": "动作参考-坐姿铺裙",
+      "model": "model_dark_background",
+      "dress": "dress_long_sleeve_ball_gown",
+      "scene": "教堂",
+      "pose": "坐姿，裙摆自然铺开",
+      "pose_mode": "experimental",
+      "pose_ref": "pose_seated_skirt",
+      "resolution": "1k",
+      "risk": "high",
+      "expected": "坐姿是高风险测试；重点看脸、手、裙摆是否严重变形。"
+    },
+    {
+      "id": "WED-011",
+      "name": "自定义背景-法式酒店楼梯",
+      "model": "model_clean_front",
+      "dress": "dress_a_line_sweetheart",
+      "scene": "自定义背景",
+      "scene_prompt": "法式酒店旋转楼梯，暖色吊灯，浅金色花艺，真实婚礼摄影光线",
+      "pose": "保持原姿势",
+      "pose_mode": "stable",
+      "pose_ref": null,
+      "resolution": "1k",
+      "risk": "medium",
+      "expected": "自定义背景生效，人物不应被楼梯或花艺遮挡。"
+    },
+    {
+      "id": "WED-012",
+      "name": "高规格抽检-2K教堂",
+      "model": "model_clean_front",
+      "dress": "dress_long_sleeve_ball_gown",
+      "scene": "教堂",
+      "pose": "保持原姿势",
+      "pose_mode": "stable",
+      "pose_ref": null,
+      "resolution": "2k",
+      "risk": "medium",
+      "expected": "2K 输出用于抽检细节；耗时和费用更高，不作为每轮必跑。"
+    }
+  ]
+}

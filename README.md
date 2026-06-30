@@ -75,7 +75,10 @@ wedding-ai-tool/
   backend/        FastAPI 后端、任务队列、AI 服务调用
   frontend/       React 前端源码
   frontend/dist/  已构建前端，后端会优先托管这个目录
+  testsets/       固定测试集、动作参考图、测试矩阵和打分表
 ```
+
+固定婚纱测试集见 `testsets/wedding-v1/`，包含 3 张模特图、3 张婚纱图、4 张动作参考图和 12 条回归测试用例。
 
 ## 注意事项
 
