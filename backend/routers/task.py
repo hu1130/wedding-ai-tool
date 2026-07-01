@@ -1,10 +1,14 @@
 """任务管理接口"""
+import io
+import json
 import os
+import re
 import shutil
+import zipfile
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from backend.config import settings
@@ -21,6 +25,7 @@ POSE_MODES = {"stable", "light", "experimental"}
 STABLE_POSE = "保持原姿势"
 LIGHT_POSES = {"正面站姿，双臂自然下垂", "轻微行走感，裙摆自然展开"}
 CLOTHING_TYPES = {"wedding_gown"}
+EXPORT_NAME_PATTERN = re.compile(r"[^0-9A-Za-z\u4e00-\u9fff._-]+")
 
 
 def _is_inside(path: str, root: str) -> bool:
@@ -116,6 +121,28 @@ def _clone_task_for_rerun(source: Task) -> Task:
         generation_mode=source.generation_mode,
         parent_task_id=root_task_id,
         rerun_index=next_index,
+    )
+
+
+def _safe_export_name(value: str) -> str:
+    cleaned = EXPORT_NAME_PATTERN.sub("_", value.strip())
+    cleaned = cleaned.strip("._-")
+    return cleaned[:48] or "deliverable"
+
+
+def _exportable_deliverables() -> list[tuple[Task, str]]:
+    deliverables: list[tuple[Task, str]] = []
+    for task in Task.list_internal():
+        if not task.is_deliverable or task.status.value != "completed":
+            continue
+        final_path = task.output_files.get("final")
+        resolved_path = Task.resolve_storage_path(final_path)
+        if resolved_path and os.path.isfile(resolved_path):
+            deliverables.append((task, resolved_path))
+
+    return sorted(
+        deliverables,
+        key=lambda item: item[0].deliverable_at or item[0].completed_at or item[0].created_at,
     )
 
 
@@ -246,6 +273,59 @@ async def get_task(task_id: str):
     return {"success": True, "task": task.to_public_dict()}
 
 
+@router.get("/deliverables/export")
+async def export_deliverables():
+    """导出所有已标记可交付的最终图。"""
+    deliverables = _exportable_deliverables()
+    if not deliverables:
+        raise HTTPException(404, detail="还没有可导出的可交付成品")
+
+    manifest = []
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for index, (task, final_path) in enumerate(deliverables, start=1):
+            _, extension = os.path.splitext(final_path)
+            extension = extension if extension else ".png"
+            safe_name = _safe_export_name(task.name or task.task_id)
+            archive_name = f"images/{index:03d}_{safe_name}_{task.task_id}{extension.lower()}"
+
+            archive.write(final_path, archive_name)
+            manifest.append(
+                {
+                    "index": index,
+                    "task_id": task.task_id,
+                    "name": task.name,
+                    "scene": task.scene,
+                    "scene_prompt": task.scene_prompt,
+                    "pose": task.pose,
+                    "resolution": task.resolution,
+                    "version": task.rerun_index,
+                    "deliverable_at": task.deliverable_at,
+                    "file": archive_name,
+                }
+            )
+
+        archive.writestr(
+            "manifest.json",
+            json.dumps(
+                {
+                    "exported_at": datetime.now().isoformat(),
+                    "count": len(manifest),
+                    "items": manifest,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+        )
+
+    filename = f"wedding-deliverables-{datetime.now().strftime('%Y%m%d-%H%M%S')}.zip"
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.patch("/task/{task_id}/deliverable")
 async def update_task_deliverable(task_id: str, req: DeliverableRequest):
     """标记或取消标记最终图是否可交付。"""
@@ -310,6 +390,7 @@ async def delete_task(task_id: str):
 @router.get("/tasks")
 async def list_tasks(
     status: Optional[str] = None,
+    deliverable: Optional[bool] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
@@ -318,6 +399,9 @@ async def list_tasks(
 
     if status:
         tasks = [t for t in tasks if t.get("status") == status]
+
+    if deliverable is not None:
+        tasks = [t for t in tasks if bool(t.get("is_deliverable")) == deliverable]
 
     total = len(tasks)
     start = (page - 1) * page_size

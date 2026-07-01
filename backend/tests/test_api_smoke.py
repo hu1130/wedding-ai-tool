@@ -1,8 +1,11 @@
+import io
+import json
 import os
 import shutil
 import tempfile
 import unittest
 import uuid
+import zipfile
 
 try:
     from fastapi import FastAPI
@@ -140,6 +143,39 @@ class ApiSmokeTest(unittest.TestCase):
             json={"is_deliverable": True},
         )
         self.assertEqual(409, response.status_code)
+
+    def test_filters_and_exports_deliverables(self):
+        empty_filter_response = self.client.get("/api/tasks?deliverable=true")
+        self.assertEqual(200, empty_filter_response.status_code)
+        self.assertEqual(0, empty_filter_response.json()["total"])
+
+        self.client.patch(
+            f"/api/task/{self.task_id}/deliverable",
+            json={"is_deliverable": True},
+        )
+
+        filter_response = self.client.get("/api/tasks?deliverable=true")
+        self.assertEqual(200, filter_response.status_code)
+        self.assertEqual(1, filter_response.json()["total"])
+
+        export_response = self.client.get("/api/deliverables/export")
+        self.assertEqual(200, export_response.status_code)
+        self.assertEqual("application/zip", export_response.headers["content-type"])
+        self.assertIn("wedding-deliverables-", export_response.headers["content-disposition"])
+
+        with zipfile.ZipFile(io.BytesIO(export_response.content)) as archive:
+            names = archive.namelist()
+            self.assertIn("manifest.json", names)
+            image_names = [name for name in names if name.startswith("images/")]
+            self.assertEqual(1, len(image_names))
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+
+        self.assertEqual(1, manifest["count"])
+        self.assertEqual(self.task_id, manifest["items"][0]["task_id"])
+
+    def test_export_deliverables_requires_marked_outputs(self):
+        export_response = self.client.get("/api/deliverables/export")
+        self.assertEqual(404, export_response.status_code)
 
 
 if __name__ == "__main__":

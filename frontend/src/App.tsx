@@ -24,6 +24,7 @@ type TaskStatus = "pending" | "processing" | "completed" | "failed";
 type PoseMode = "stable" | "light" | "experimental";
 type ClothingType = "wedding_gown";
 type AssetCategory = "model" | "dress" | "face" | "pose_reference";
+type TaskFilter = "all" | "deliverable";
 
 type Task = {
   task_id: string;
@@ -255,6 +256,27 @@ const api = {
     const data = await readApiJson<{ task: Task }>(response, "更新交付标记失败");
     return data.task;
   },
+  async exportDeliverables() {
+    const response = await fetch("/api/deliverables/export");
+    if (!response.ok) {
+      const text = await response.text();
+      let message = "导出交付包失败";
+      if (text) {
+        try {
+          const data = JSON.parse(text) as { detail?: unknown };
+          message = data.detail ? String(data.detail) : message;
+        } catch {
+          message = text;
+        }
+      }
+      throw new Error(message);
+    }
+
+    const disposition = response.headers.get("content-disposition") || "";
+    const match = disposition.match(/filename="?([^";]+)"?/i);
+    const filename = match?.[1] || "wedding-deliverables.zip";
+    return { blob: await response.blob(), filename };
+  },
   async deleteTask(taskId: string) {
     const response = await fetch(`/api/task/${taskId}`, { method: "DELETE" });
     return readApiJson<{ removed_dirs: number; removed_files: number; success: boolean }>(
@@ -336,9 +358,11 @@ export function App() {
   const [assets, setAssets] = useState<LibraryAsset[]>([]);
   const [librarySlot, setLibrarySlot] = useState<UploadSlot>("model");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
   const [health, setHealth] = useState<"checking" | "ok" | "down">("checking");
   const [toast, setToast] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [exportingDeliverables, setExportingDeliverables] = useState(false);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [rerunningTaskId, setRerunningTaskId] = useState<string | null>(null);
   const [markingTaskId, setMarkingTaskId] = useState<string | null>(null);
@@ -606,9 +630,35 @@ export function App() {
     }
   }
 
+  async function handleExportDeliverables() {
+    if (deliverableCount === 0) {
+      setToast("还没有可导出的可交付成品");
+      return;
+    }
+
+    setExportingDeliverables(true);
+    try {
+      const { blob, filename } = await api.exportDeliverables();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setToast(`已导出 ${deliverableCount} 张可交付图`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "导出交付包失败");
+    } finally {
+      setExportingDeliverables(false);
+    }
+  }
+
   const completedCount = tasks.filter((task) => task.status === "completed").length;
   const deliverableCount = tasks.filter((task) => task.is_deliverable).length;
   const activeCount = tasks.filter((task) => ["pending", "processing"].includes(task.status)).length;
+  const visibleTasks = taskFilter === "deliverable" ? tasks.filter((task) => task.is_deliverable) : tasks;
 
   return (
     <main className="studio-shell">
@@ -923,21 +973,53 @@ export function App() {
             <span className="section-kicker">队列</span>
             <h2>生成任务</h2>
           </div>
-          <button className="small-button" onClick={fetchTasks}>
-            <RefreshCw size={16} />
-            更新
-          </button>
+          <div className="task-toolbar">
+            <div className="segmented task-filter" aria-label="任务筛选">
+              <button
+                className={taskFilter === "all" ? "active" : ""}
+                onClick={() => setTaskFilter("all")}
+                type="button"
+              >
+                全部
+              </button>
+              <button
+                className={taskFilter === "deliverable" ? "active" : ""}
+                onClick={() => setTaskFilter("deliverable")}
+                type="button"
+              >
+                可交付
+              </button>
+            </div>
+            <button
+              className="small-button export-package-button"
+              disabled={exportingDeliverables || deliverableCount === 0}
+              onClick={handleExportDeliverables}
+              title={deliverableCount === 0 ? "先把满意的结果标记为可交付" : "下载全部可交付最终图"}
+              type="button"
+            >
+              {exportingDeliverables ? <Loader2 size={16} className="spin" /> : <ArrowDownToLine size={16} />}
+              导出交付包
+            </button>
+            <button className="small-button" onClick={fetchTasks} type="button">
+              <RefreshCw size={16} />
+              更新
+            </button>
+          </div>
         </div>
 
         <div className="task-list">
-          {tasks.length === 0 ? (
+          {visibleTasks.length === 0 ? (
             <div className="empty-state">
-              <ImagePlus size={28} />
-              <strong>还没有生成任务</strong>
-              <span>上传素材后，点击开始生成即可创建第一条任务。</span>
+              {taskFilter === "deliverable" ? <Star size={28} /> : <ImagePlus size={28} />}
+              <strong>{taskFilter === "deliverable" ? "还没有可交付结果" : "还没有生成任务"}</strong>
+              <span>
+                {taskFilter === "deliverable"
+                  ? "打开满意的最终图，点击“设为可交付”后会出现在这里。"
+                  : "上传素材后，点击开始生成即可创建第一条任务。"}
+              </span>
             </div>
             ) : (
-              tasks.map((task) => {
+              visibleTasks.map((task) => {
                 const deleting = deletingTaskId === task.task_id;
                 const canDelete = task.status !== "processing";
                 const sceneInfo = taskSceneSummary(task);

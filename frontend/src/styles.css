@@ -155,7 +155,8 @@ h1 {
   transform: translateY(-1px);
 }
 
-.primary-action:disabled {
+.primary-action:disabled,
+.small-button:disabled {
   cursor: not-allowed;
   opacity: 0.58;
   transform: none;
@@ -802,6 +803,28 @@ h1 {
   padding-bottom: 18px;
 }
 
+.task-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.task-filter button {
+  width: 78px;
+}
+
+.export-package-button {
+  color: #7b541f;
+  border-color: rgba(185, 138, 73, 0.38);
+  background: #fff7df;
+}
+
+.export-package-button:hover:not(:disabled) {
+  background: #fff0c9;
+}
+
 .task-list {
   display: grid;
   gap: 10px;
@@ -1442,9 +1465,20 @@ h1 {
   .demo-card,
   .comparison-heading,
   .version-strip,
+  .section-head,
   .pose-group-head {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .task-toolbar,
+  .task-toolbar .small-button,
+  .task-toolbar .segmented {
+    width: 100%;
+  }
+
+  .task-filter button {
+    width: 50%;
   }
 
   .version-list {
