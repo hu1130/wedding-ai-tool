@@ -23,6 +23,9 @@ class StepStatus(str, Enum):
     FAILED = "failed"
 
 
+INTERRUPTED_TASK_MESSAGE = "服务重启后发现任务仍处于生成中，已自动标记为失败，请重跑一版。"
+
+
 class Task:
     """任务模型，用 JSON 文件持久化。"""
 
@@ -350,3 +353,20 @@ class Task:
             os.replace(tmp_path, path)
 
         return cls.from_dict(deleted)
+
+    @classmethod
+    def recover_interrupted_processing_tasks(cls) -> int:
+        """Mark tasks left processing by a previous server run as failed."""
+        recovered = 0
+        for task in cls.list_internal():
+            if task.status != TaskStatus.PROCESSING:
+                continue
+
+            task.status = TaskStatus.FAILED
+            task.error_message = task.error_message or INTERRUPTED_TASK_MESSAGE
+            for step_name, step_status in task.steps.items():
+                if step_status == StepStatus.PROCESSING:
+                    task.steps[step_name] = StepStatus.FAILED
+            task.save()
+            recovered += 1
+        return recovered

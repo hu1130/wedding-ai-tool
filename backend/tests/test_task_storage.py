@@ -5,7 +5,7 @@ import tempfile
 import unittest
 import uuid
 
-from backend.models.task import Task, TaskStatus
+from backend.models.task import INTERRUPTED_TASK_MESSAGE, StepStatus, Task, TaskStatus
 
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
@@ -115,6 +115,29 @@ class TaskStorageTest(unittest.TestCase):
         self.assertIsNotNone(deleted)
         with open(Task.DATA_FILE, "r", encoding="utf-8") as f:
             self.assertEqual([], json.load(f))
+
+    def test_recover_interrupted_processing_tasks(self):
+        interrupted = Task(task_id=f"processing_{self.test_id}")
+        interrupted.status = TaskStatus.PROCESSING
+        interrupted.progress = 60
+        interrupted.steps["dress"] = StepStatus.COMPLETED
+        interrupted.steps["scene"] = StepStatus.PROCESSING
+        interrupted.save()
+
+        completed = Task(task_id=f"completed_{self.test_id}")
+        completed.status = TaskStatus.COMPLETED
+        completed.progress = 100
+        completed.save()
+
+        recovered = Task.recover_interrupted_processing_tasks()
+
+        self.assertEqual(1, recovered)
+        recovered_task = Task.get(interrupted.task_id)
+        untouched_task = Task.get(completed.task_id)
+        self.assertEqual(TaskStatus.FAILED, recovered_task.status)
+        self.assertEqual(INTERRUPTED_TASK_MESSAGE, recovered_task.error_message)
+        self.assertEqual(StepStatus.FAILED, recovered_task.steps["scene"])
+        self.assertEqual(TaskStatus.COMPLETED, untouched_task.status)
 
 
 if __name__ == "__main__":

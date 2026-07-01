@@ -823,6 +823,10 @@ h1 {
   white-space: nowrap;
 }
 
+.task-main .task-subline.failed {
+  color: var(--danger);
+}
+
 .progress-track {
   height: 8px;
   border-radius: 999px;
@@ -1032,18 +1036,58 @@ h1 {
 .result-empty {
   display: grid;
   place-items: center;
+  gap: 8px;
+  padding: 16px;
   color: var(--muted);
   border: 1px dashed var(--line);
+  text-align: center;
+}
+
+.image-fallback {
+  color: var(--danger);
+  background: #fff8f6;
+  border-color: rgba(184, 74, 67, 0.28);
+}
+
+.image-fallback svg {
+  color: var(--danger);
+}
+
+.image-fallback span {
+  max-width: 220px;
+  font-size: 13px;
 }
 
 .error-box {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
+  margin-bottom: 18px;
   padding: 16px;
   border-radius: 8px;
   background: #fae7e4;
   color: var(--danger);
+}
+
+.error-box svg {
+  flex: 0 0 auto;
+}
+
+.error-box div {
+  display: grid;
+  gap: 4px;
+}
+
+.error-box strong,
+.error-box span,
+.error-box em {
+  display: block;
+}
+
+.error-box em {
+  color: #7d3a35;
+  font-size: 13px;
+  font-style: normal;
 }
 
 .download-button {

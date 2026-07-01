@@ -12,6 +12,7 @@ frontend/.vite/
 uploads/
 outputs/
 backend/tasks.json
+backend/tasks.json.bak-*
 server.log
 server.err.log
 server.pid

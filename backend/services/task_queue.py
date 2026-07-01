@@ -256,6 +256,9 @@ async def init_queue():
     global _task_queue
     if _task_queue is not None:
         return
+    recovered = Task.recover_interrupted_processing_tasks()
+    if recovered:
+        print(f"[INFO] Recovered {recovered} interrupted processing task(s)")
     _task_queue = asyncio.Queue()
     asyncio.create_task(_queue_worker())
 

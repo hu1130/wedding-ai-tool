@@ -234,6 +234,26 @@ function taskSceneSummary(task: Pick<Task, "scene" | "scene_prompt">) {
   return task.scene;
 }
 
+function taskFailureMessage(task: Pick<Task, "error_message">) {
+  return task.error_message?.trim() || "生成失败，请检查素材或后端配置。";
+}
+
+function failureAdvice(message: string) {
+  if (message.includes("ALIYUN_DASHSCOPE_API_KEY")) {
+    return "配置 DashScope API Key 后再重跑。";
+  }
+  if (message.includes("服务重启")) {
+    return "任务在服务重启时中断，使用“重跑一版”重新生成。";
+  }
+  if (message.includes("文件不存在") || message.includes("不存在")) {
+    return "检查素材或结果文件是否被移动、删除，再重新上传或重跑。";
+  }
+  if (message.includes("超时") || message.toLowerCase().includes("timeout")) {
+    return "稍后重跑；如果连续超时，检查网络和 DashScope 任务状态。";
+  }
+  return "先重跑一版；如果持续失败，换更清晰的素材或检查后端日志。";
+}
+
 export function App() {
   const [uploads, setUploads] = useState<Record<UploadSlot, UploadState>>({
     model: emptyUpload,
@@ -734,6 +754,10 @@ export function App() {
                 const deleting = deletingTaskId === task.task_id;
                 const canDelete = task.status !== "processing";
                 const sceneInfo = taskSceneSummary(task);
+                const taskLine =
+                  task.status === "failed"
+                    ? `失败原因：${taskFailureMessage(task)}`
+                    : `${sceneInfo} / ${task.resolution.toUpperCase()} / 进度 ${Math.round(task.progress)}%`;
 
                 return (
                   <div className="task-row" key={task.task_id}>
@@ -747,8 +771,8 @@ export function App() {
                         {taskDisplayName(task)}
                         <span className="version-badge">{taskVersionLabel(task)}</span>
                       </strong>
-                      <span title={sceneInfo}>
-                        {sceneInfo} / {task.resolution.toUpperCase()} / 进度 {Math.round(task.progress)}%
+                      <span className={task.status === "failed" ? "task-subline failed" : "task-subline"} title={taskLine}>
+                        {taskLine}
                       </span>
                     </div>
                     <div className="progress-track">
@@ -795,6 +819,33 @@ export function App() {
       )}
     </main>
   );
+}
+
+function ResultImage({
+  src,
+  alt,
+  fallback,
+}: {
+  src: string;
+  alt: string;
+  fallback: string;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  if (failed) {
+    return (
+      <div className="result-empty image-fallback">
+        <AlertCircle size={20} />
+        <span>{fallback}</span>
+      </div>
+    );
+  }
+
+  return <img src={src} alt={alt} loading="lazy" onError={() => setFailed(true)} />;
 }
 
 function MetricCard({
@@ -897,6 +948,7 @@ function ResultDialog({
     { key: "dress", label: "款式/试衣步骤" },
     { key: "scene", label: "场景生成结果" },
   ];
+  const errorMessage = taskFailureMessage(task);
 
   return (
     <div className="dialog-backdrop" role="dialog" aria-modal="true">
@@ -963,52 +1015,62 @@ function ResultDialog({
           </div>
         )}
 
-        {task.status === "failed" ? (
+        {task.status === "failed" && (
           <div className="error-box">
             <AlertCircle size={20} />
-            <span>{task.error_message || "生成失败，请检查素材或后端配置。"}</span>
+            <div>
+              <strong>生成没有完成</strong>
+              <span>{errorMessage}</span>
+              <em>{failureAdvice(errorMessage)}</em>
+            </div>
           </div>
-        ) : (
-          <>
-            <div className="comparison-strip">
-              <div className="comparison-heading">
-                <span className="section-kicker">交付对比</span>
-                <strong>老板一眼看懂：原模特、原婚纱、最终图</strong>
-              </div>
-              <div className="comparison-grid">
-                {comparisonImages.map((item) => (
-                  <div className="comparison-card" key={item.key}>
-                    <strong>{item.label}</strong>
-                    {item.key === "final" && !task.output_files?.final ? (
-                      <div className="result-empty">暂未生成</div>
-                    ) : (
-                      <img src={item.src} alt={item.label} />
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="process-results">
-              <div className="comparison-heading compact">
-                <span className="section-kicker">过程文件</span>
-                <strong>用于排查款式、场景和最终图差异</strong>
-              </div>
-              <div className="result-grid">
-                {imageSteps.map((step) => (
-                  <div className="result-card" key={step.key}>
-                    <strong>{step.label}</strong>
-                    {task.output_files?.[step.key] ? (
-                      <img src={`/api/task/${task.task_id}/step/${step.key}`} alt={step.label} />
-                    ) : (
-                      <div className="result-empty">暂未生成</div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
         )}
+
+        <div className="comparison-strip">
+          <div className="comparison-heading">
+            <span className="section-kicker">交付对比</span>
+            <strong>老板一眼看懂：原模特、原婚纱、最终图</strong>
+          </div>
+          <div className="comparison-grid">
+            {comparisonImages.map((item) => (
+              <div className="comparison-card" key={item.key}>
+                <strong>{item.label}</strong>
+                {item.key === "final" && !task.output_files?.final ? (
+                  <div className="result-empty">暂未生成</div>
+                ) : (
+                  <ResultImage
+                    src={item.src}
+                    alt={item.label}
+                    fallback={`${item.label}无法读取`}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="process-results">
+          <div className="comparison-heading compact">
+            <span className="section-kicker">过程文件</span>
+            <strong>用于排查款式、场景和最终图差异</strong>
+          </div>
+          <div className="result-grid">
+            {imageSteps.map((step) => (
+              <div className="result-card" key={step.key}>
+                <strong>{step.label}</strong>
+                {task.output_files?.[step.key] ? (
+                  <ResultImage
+                    src={`/api/task/${task.task_id}/step/${step.key}`}
+                    alt={step.label}
+                    fallback={`${step.label}无法读取`}
+                  />
+                ) : (
+                  <div className="result-empty">暂未生成</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
 
         <div className="dialog-actions">
           {task.output_files?.final && (
