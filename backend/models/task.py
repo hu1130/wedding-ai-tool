@@ -24,10 +24,11 @@ class StepStatus(str, Enum):
 
 
 class Task:
-    """任务模型，用 JSON 文件持久化"""
+    """任务模型，用 JSON 文件持久化。"""
 
     DATA_FILE = ""
     _FILE_LOCK = threading.Lock()
+    _PATH_ROOT_NAMES = ("uploads", "outputs")
 
     def __init__(
         self,
@@ -52,7 +53,7 @@ class Task:
         self.task_id = task_id or uuid.uuid4().hex[:12]
         self.name = name or f"任务_{self.task_id}"
         self.status = TaskStatus.PENDING
-        self.progress = 0.0  # 0~100
+        self.progress = 0.0
         self.model_file = model_file
         self.dress_file = dress_file
         self.face_file = face_file
@@ -79,16 +80,16 @@ class Task:
             "upscale": StepStatus.PENDING,
         }
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         return {
             "task_id": self.task_id,
             "name": self.name,
             "status": self.status.value,
             "progress": self.progress,
-            "model_file": self.model_file,
-            "dress_file": self.dress_file,
-            "face_file": self.face_file,
-            "pose_reference_file": self.pose_reference_file,
+            "model_file": self.to_storage_path(self.model_file),
+            "dress_file": self.to_storage_path(self.dress_file),
+            "face_file": self.to_storage_path(self.face_file),
+            "pose_reference_file": self.to_storage_path(self.pose_reference_file),
             "clothing_type": self.clothing_type,
             "scene": self.scene,
             "scene_prompt": self.scene_prompt,
@@ -100,32 +101,45 @@ class Task:
             "generation_mode": self.generation_mode,
             "parent_task_id": self.parent_task_id,
             "rerun_index": self.rerun_index,
-            "output_files": self.output_files,
+            "output_files": {
+                key: self.to_storage_path(path)
+                for key, path in self.output_files.items()
+            },
             "error_message": self.error_message,
             "created_at": self.created_at,
             "completed_at": self.completed_at,
-            "steps": {k: v.value for k, v in self.steps.items()},
+            "steps": {key: value.value for key, value in self.steps.items()},
         }
 
-    def to_public_dict(self):
+    def to_public_dict(self) -> dict:
         data = self.to_dict()
         for key in ["model_file", "dress_file", "face_file", "pose_reference_file"]:
             if data.get(key):
                 data[key] = os.path.basename(data[key])
         data["output_files"] = {
-            key: True for key, path in self.output_files.items() if path and os.path.exists(path)
+            key: True
+            for key, path in self.output_files.items()
+            if path and os.path.exists(self.resolve_storage_path(path))
         }
         return data
 
     @classmethod
     def from_dict(cls, data: dict) -> "Task":
+        if not isinstance(data, dict) or not data.get("task_id"):
+            raise ValueError("Invalid task record: missing task_id")
+
+        try:
+            rerun_index = int(data.get("rerun_index", 1) or 1)
+        except (TypeError, ValueError):
+            rerun_index = 1
+
         task = cls(
             task_id=data.get("task_id"),
             name=data.get("name", ""),
-            model_file=data.get("model_file", ""),
-            dress_file=data.get("dress_file", ""),
-            face_file=data.get("face_file"),
-            pose_reference_file=data.get("pose_reference_file"),
+            model_file=cls.resolve_storage_path(data.get("model_file", "")),
+            dress_file=cls.resolve_storage_path(data.get("dress_file", "")),
+            face_file=cls.resolve_storage_path(data.get("face_file")),
+            pose_reference_file=cls.resolve_storage_path(data.get("pose_reference_file")),
             clothing_type=data.get("clothing_type", "wedding_gown"),
             scene=data.get("scene", "海边"),
             scene_prompt=data.get("scene_prompt", ""),
@@ -136,18 +150,32 @@ class Task:
             preserve_face=data.get("preserve_face", True),
             generation_mode=data.get("generation_mode", "stable"),
             parent_task_id=data.get("parent_task_id"),
-            rerun_index=int(data.get("rerun_index", 1) or 1),
+            rerun_index=rerun_index,
         )
-        task.status = TaskStatus(data.get("status", "pending"))
+
+        try:
+            task.status = TaskStatus(data.get("status", "pending"))
+        except ValueError:
+            task.status = TaskStatus.PENDING
         task.progress = data.get("progress", 0)
-        task.output_files = data.get("output_files", {})
+        task.output_files = {
+            key: cls.resolve_storage_path(path)
+            for key, path in data.get("output_files", {}).items()
+            if path
+        }
         task.error_message = data.get("error_message", "")
         task.created_at = data.get("created_at", datetime.now().isoformat())
         task.completed_at = data.get("completed_at", "")
+
         raw_steps = data.get("steps", {})
-        for k, v in raw_steps.items():
-            if k in task.steps:
-                task.steps[k] = StepStatus(v)
+        if isinstance(raw_steps, dict):
+            for key, value in raw_steps.items():
+                if key not in task.steps:
+                    continue
+                try:
+                    task.steps[key] = StepStatus(value)
+                except ValueError:
+                    task.steps[key] = StepStatus.PENDING
         return task
 
     @classmethod
@@ -158,30 +186,119 @@ class Task:
             )
         return cls.DATA_FILE
 
+    @classmethod
+    def project_root(cls) -> str:
+        return os.path.abspath(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
+    @classmethod
+    def _relative_from_known_root(cls, path: str) -> Optional[str]:
+        if not path:
+            return None
+        parts = os.path.normpath(path).split(os.sep)
+        lowered = [part.lower() for part in parts]
+        for root_name in cls._PATH_ROOT_NAMES:
+            if root_name in lowered:
+                index = lowered.index(root_name)
+                return "/".join(parts[index:])
+        return None
+
+    @classmethod
+    def to_storage_path(cls, path: Optional[str]) -> Optional[str]:
+        if not path:
+            return path
+
+        normalized = os.path.normpath(path)
+        if not os.path.isabs(normalized):
+            return normalized.replace(os.sep, "/")
+
+        project_root = cls.project_root()
+        try:
+            relative = os.path.relpath(normalized, project_root)
+            if not relative.startswith("..") and not os.path.isabs(relative):
+                return relative.replace(os.sep, "/")
+        except ValueError:
+            pass
+
+        known_relative = cls._relative_from_known_root(normalized)
+        if known_relative:
+            return known_relative.replace(os.sep, "/")
+
+        return normalized
+
+    @classmethod
+    def resolve_storage_path(cls, path: Optional[str]) -> Optional[str]:
+        if not path:
+            return path
+
+        normalized = os.path.normpath(path)
+        if os.path.isabs(normalized):
+            if os.path.exists(normalized):
+                return normalized
+            known_relative = cls._relative_from_known_root(normalized)
+            if known_relative:
+                return os.path.abspath(os.path.join(cls.project_root(), known_relative))
+            return normalized
+
+        project_root = cls.project_root()
+        candidate = os.path.join(project_root, normalized)
+        if os.path.exists(candidate):
+            return os.path.abspath(candidate)
+
+        if os.sep not in normalized and "/" not in normalized:
+            upload_candidate = os.path.join(project_root, "uploads", normalized)
+            if os.path.exists(upload_candidate):
+                return os.path.abspath(upload_candidate)
+
+        return os.path.abspath(candidate)
+
+    @classmethod
+    def _normalize_task_records(cls, raw_tasks) -> list[dict]:
+        if not isinstance(raw_tasks, list):
+            return []
+
+        normalized: list[dict] = []
+        for item in raw_tasks:
+            if not isinstance(item, dict):
+                continue
+            if item.get("task_id"):
+                normalized.append(item)
+                continue
+            wrapped = item.get("value")
+            if isinstance(wrapped, list):
+                normalized.extend(
+                    task for task in wrapped
+                    if isinstance(task, dict) and task.get("task_id")
+                )
+        return normalized
+
+    @classmethod
+    def _read_task_records(cls) -> list[dict]:
+        path = cls._data_path()
+        if not os.path.exists(path):
+            return []
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                return cls._normalize_task_records(json.load(f))
+        except FileNotFoundError:
+            return []
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("Task data file is corrupted; repair tasks.json first") from exc
+
     def save(self):
-        """保存到 tasks.json"""
         path = self._data_path()
         with self._FILE_LOCK:
-            tasks = []
-            if os.path.exists(path):
-                try:
-                    with open(path, "r", encoding="utf-8-sig") as f:
-                        tasks = json.load(f)
-                except FileNotFoundError:
-                    tasks = []
-                except json.JSONDecodeError as exc:
-                    raise RuntimeError("任务数据文件损坏，请先修复 tasks.json") from exc
+            tasks = self._read_task_records()
 
-            # 更新或新增
             updated = False
-            for i, t in enumerate(tasks):
-                if t.get("task_id") == self.task_id:
-                    tasks[i] = self.to_dict()
+            for index, item in enumerate(tasks):
+                if item.get("task_id") == self.task_id:
+                    tasks[index] = self.to_dict()
                     updated = True
                     break
             if not updated:
                 tasks.append(self.to_dict())
 
+            os.makedirs(os.path.dirname(path), exist_ok=True)
             tmp_path = f"{path}.tmp"
             with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(tasks, f, ensure_ascii=False, indent=2)
@@ -189,47 +306,31 @@ class Task:
 
     @classmethod
     def get(cls, task_id: str) -> Optional["Task"]:
-        path = cls._data_path()
-        if not os.path.exists(path):
-            return None
         with cls._FILE_LOCK:
-            with open(path, "r", encoding="utf-8-sig") as f:
-                tasks = json.load(f)
-        for t in tasks:
-            if t.get("task_id") == task_id:
-                return cls.from_dict(t)
+            tasks = cls._read_task_records()
+        for item in tasks:
+            if item.get("task_id") == task_id:
+                return cls.from_dict(item)
         return None
 
     @classmethod
     def list_all(cls) -> list[dict]:
-        path = cls._data_path()
-        if not os.path.exists(path):
-            return []
         with cls._FILE_LOCK:
-            with open(path, "r", encoding="utf-8-sig") as f:
-                tasks = json.load(f)
-        public_tasks = [cls.from_dict(t).to_public_dict() for t in tasks]
-        return sorted(public_tasks, key=lambda x: x.get("created_at", ""), reverse=True)
+            tasks = cls._read_task_records()
+        public_tasks = [cls.from_dict(item).to_public_dict() for item in tasks]
+        return sorted(public_tasks, key=lambda item: item.get("created_at", ""), reverse=True)
 
     @classmethod
     def list_internal(cls) -> list["Task"]:
-        path = cls._data_path()
-        if not os.path.exists(path):
-            return []
         with cls._FILE_LOCK:
-            with open(path, "r", encoding="utf-8-sig") as f:
-                tasks = json.load(f)
-        return [cls.from_dict(t) for t in tasks]
+            tasks = cls._read_task_records()
+        return [cls.from_dict(item) for item in tasks]
 
     @classmethod
     def delete(cls, task_id: str) -> Optional["Task"]:
         path = cls._data_path()
-        if not os.path.exists(path):
-            return None
-
         with cls._FILE_LOCK:
-            with open(path, "r", encoding="utf-8-sig") as f:
-                tasks = json.load(f)
+            tasks = cls._read_task_records()
 
             deleted = None
             remaining = []
@@ -242,6 +343,7 @@ class Task:
             if deleted is None:
                 return None
 
+            os.makedirs(os.path.dirname(path), exist_ok=True)
             tmp_path = f"{path}.tmp"
             with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(remaining, f, ensure_ascii=False, indent=2)

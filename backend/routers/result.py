@@ -37,30 +37,35 @@ async def get_result(task_id: str):
     if not task:
         raise HTTPException(404, detail="任务不存在")
 
-    final_path = task.output_files.get("final")
+    final_path = Task.resolve_storage_path(task.output_files.get("final"))
     if not final_path or not os.path.exists(final_path):
         raise HTTPException(404, detail="结果图片尚未生成")
 
     media_type = _image_media_type(final_path)
-    return FileResponse(final_path, media_type=media_type, filename=_download_name(task_id, "final", media_type))
+    return FileResponse(
+        final_path,
+        media_type=media_type,
+        filename=_download_name(task_id, "final", media_type),
+    )
 
 
 @router.get("/task/{task_id}/step/{step_name}")
 async def get_step_result(task_id: str, step_name: str):
-    """
-    获取某一步的结果图片
-    step_name: dress / face / scene
-    """
+    """获取某一步的结果图片。step_name: dress / face / scene / composite"""
     task = Task.get(task_id)
     if not task:
         raise HTTPException(404, detail="任务不存在")
 
-    step_path = task.output_files.get(step_name)
+    step_path = Task.resolve_storage_path(task.output_files.get(step_name))
     if not step_path or not os.path.exists(step_path):
         raise HTTPException(404, detail=f"步骤 {step_name} 的结果图片不存在")
 
     media_type = _image_media_type(step_path)
-    return FileResponse(step_path, media_type=media_type, filename=_download_name(task_id, step_name, media_type))
+    return FileResponse(
+        step_path,
+        media_type=media_type,
+        filename=_download_name(task_id, step_name, media_type),
+    )
 
 
 @router.get("/task/{task_id}/input/{input_name}")
@@ -79,9 +84,13 @@ async def get_input_image(task_id: str, input_name: str):
     if input_name not in input_paths:
         raise HTTPException(404, detail="输入素材不存在")
 
-    image_path = input_paths[input_name]
+    image_path = Task.resolve_storage_path(input_paths[input_name])
     if not image_path or not os.path.exists(image_path):
         raise HTTPException(404, detail="输入素材不存在")
 
     media_type = _image_media_type(image_path)
-    return FileResponse(image_path, media_type=media_type, filename=_download_name(task_id, input_name, media_type))
+    return FileResponse(
+        image_path,
+        media_type=media_type,
+        filename=_download_name(task_id, input_name, media_type),
+    )

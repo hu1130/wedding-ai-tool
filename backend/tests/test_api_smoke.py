@@ -1,0 +1,107 @@
+import os
+import shutil
+import tempfile
+import unittest
+import uuid
+
+try:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+except Exception as exc:  # pragma: no cover - dependency guard for bare Python envs
+    FastAPI = None
+    TestClient = None
+    FASTAPI_IMPORT_ERROR = exc
+else:
+    FASTAPI_IMPORT_ERROR = None
+
+from backend.models.task import Task, TaskStatus
+
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+
+
+@unittest.skipIf(TestClient is None, f"FastAPI test dependencies unavailable: {FASTAPI_IMPORT_ERROR}")
+class ApiSmokeTest(unittest.TestCase):
+    def setUp(self):
+        self.original_data_file = Task.DATA_FILE
+        self.data_dir = tempfile.TemporaryDirectory()
+        Task.DATA_FILE = os.path.join(self.data_dir.name, "tasks.json")
+        self.project_root = Task.project_root()
+        self.test_id = uuid.uuid4().hex[:10]
+        self.created_files: list[str] = []
+        self.created_dirs: list[str] = []
+
+        self.model = self._project_file(f"uploads/api_model_{self.test_id}.png")
+        self.dress = self._project_file(f"uploads/api_dress_{self.test_id}.png")
+        output_dir = self._project_dir(f"outputs/api_task_{self.test_id}")
+        self.final = os.path.join(output_dir, "final.png")
+        with open(self.final, "wb") as f:
+            f.write(PNG_BYTES)
+        self.created_files.append(self.final)
+
+        task = Task(
+            task_id=f"api_{self.test_id}",
+            name="api smoke",
+            model_file=self.model,
+            dress_file=self.dress,
+        )
+        task.status = TaskStatus.COMPLETED
+        task.progress = 100
+        task.output_files["final"] = self.final
+        task.save()
+
+        from backend.routers import result as result_router
+        from backend.routers import task as task_router
+
+        app = FastAPI()
+        app.include_router(task_router.router)
+        app.include_router(result_router.router)
+        self.client = TestClient(app)
+        self.task_id = task.task_id
+
+    def tearDown(self):
+        Task.DATA_FILE = self.original_data_file
+        for path in self.created_files:
+            if os.path.exists(path):
+                os.remove(path)
+        for path in sorted(self.created_dirs, key=len, reverse=True):
+            if os.path.isdir(path):
+                shutil.rmtree(path)
+        self.data_dir.cleanup()
+
+    def _project_file(self, relative_path: str) -> str:
+        path = os.path.join(self.project_root, relative_path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(PNG_BYTES)
+        self.created_files.append(path)
+        return path
+
+    def _project_dir(self, relative_path: str) -> str:
+        path = os.path.join(self.project_root, relative_path)
+        os.makedirs(path, exist_ok=True)
+        self.created_dirs.append(path)
+        return path
+
+    def test_tasks_and_image_endpoints(self):
+        tasks_response = self.client.get("/api/tasks")
+        self.assertEqual(200, tasks_response.status_code)
+        tasks_payload = tasks_response.json()
+        self.assertEqual(1, tasks_payload["total"])
+        self.assertTrue(tasks_payload["tasks"][0]["output_files"]["final"])
+
+        detail_response = self.client.get(f"/api/task/{self.task_id}")
+        self.assertEqual(200, detail_response.status_code)
+        self.assertEqual(self.task_id, detail_response.json()["task"]["task_id"])
+
+        result_response = self.client.get(f"/api/task/{self.task_id}/result")
+        self.assertEqual(200, result_response.status_code)
+        self.assertEqual("image/png", result_response.headers["content-type"])
+
+        input_response = self.client.get(f"/api/task/{self.task_id}/input/model")
+        self.assertEqual(200, input_response.status_code)
+        self.assertEqual("image/png", input_response.headers["content-type"])
+
+
+if __name__ == "__main__":
+    unittest.main()
