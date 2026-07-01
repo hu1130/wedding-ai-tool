@@ -139,6 +139,22 @@ class TaskStorageTest(unittest.TestCase):
         self.assertEqual(StepStatus.FAILED, recovered_task.steps["scene"])
         self.assertEqual(TaskStatus.COMPLETED, untouched_task.status)
 
+        public_data = recovered_task.to_public_dict()
+        self.assertEqual("scene", public_data["current_step"])
+        self.assertEqual("场景生成失败", public_data["current_step_label"])
+
+    def test_public_dict_exposes_current_processing_step(self):
+        task = Task(task_id=f"step_{self.test_id}")
+        task.status = TaskStatus.PROCESSING
+        task.progress = 60
+        task.steps["dress"] = StepStatus.COMPLETED
+        task.steps["scene"] = StepStatus.PROCESSING
+
+        public_data = task.to_public_dict()
+
+        self.assertEqual("scene", public_data["current_step"])
+        self.assertEqual("场景生成", public_data["current_step_label"])
+
 
 if __name__ == "__main__":
     unittest.main()

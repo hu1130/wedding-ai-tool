@@ -43,6 +43,8 @@ type Task = {
   generation_mode?: "stable" | "creative";
   parent_task_id?: string | null;
   rerun_index?: number;
+  current_step?: string;
+  current_step_label?: string;
   output_files: Record<string, boolean>;
   error_message: string;
   created_at: string;
@@ -236,6 +238,10 @@ function taskSceneSummary(task: Pick<Task, "scene" | "scene_prompt">) {
 
 function taskFailureMessage(task: Pick<Task, "error_message">) {
   return task.error_message?.trim() || "生成失败，请检查素材或后端配置。";
+}
+
+function taskCurrentStepLabel(task: Pick<Task, "current_step_label" | "status">) {
+  return task.current_step_label || statusCopy[task.status];
 }
 
 function failureAdvice(message: string) {
@@ -754,10 +760,11 @@ export function App() {
                 const deleting = deletingTaskId === task.task_id;
                 const canDelete = task.status !== "processing";
                 const sceneInfo = taskSceneSummary(task);
+                const stepInfo = taskCurrentStepLabel(task);
                 const taskLine =
                   task.status === "failed"
                     ? `失败原因：${taskFailureMessage(task)}`
-                    : `${sceneInfo} / ${task.resolution.toUpperCase()} / 进度 ${Math.round(task.progress)}%`;
+                    : `${stepInfo} / ${sceneInfo} / ${task.resolution.toUpperCase()} / 进度 ${Math.round(task.progress)}%`;
 
                 return (
                   <div className="task-row" key={task.task_id}>
@@ -949,6 +956,7 @@ function ResultDialog({
     { key: "scene", label: "场景生成结果" },
   ];
   const errorMessage = taskFailureMessage(task);
+  const stepLabel = taskCurrentStepLabel(task);
 
   return (
     <div className="dialog-backdrop" role="dialog" aria-modal="true">
@@ -981,6 +989,9 @@ function ResultDialog({
           </span>
           <span>
             规格 <strong>{task.resolution.toUpperCase()}</strong>
+          </span>
+          <span>
+            当前步骤 <strong>{stepLabel}</strong>
           </span>
           <span>
             模式 <strong>{task.generation_mode === "creative" ? "自由重绘" : "保款式稳定"}</strong>

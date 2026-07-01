@@ -89,6 +89,8 @@ class ApiSmokeTest(unittest.TestCase):
         tasks_payload = tasks_response.json()
         self.assertEqual(1, tasks_payload["total"])
         self.assertTrue(tasks_payload["tasks"][0]["output_files"]["final"])
+        self.assertEqual("completed", tasks_payload["tasks"][0]["current_step"])
+        self.assertEqual("已完成", tasks_payload["tasks"][0]["current_step_label"])
 
         detail_response = self.client.get(f"/api/task/{self.task_id}")
         self.assertEqual(200, detail_response.status_code)

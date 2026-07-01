@@ -24,6 +24,12 @@ class StepStatus(str, Enum):
 
 
 INTERRUPTED_TASK_MESSAGE = "服务重启后发现任务仍处于生成中，已自动标记为失败，请重跑一版。"
+STEP_LABELS = {
+    "dress": "AI试衣",
+    "face": "人脸处理",
+    "scene": "场景生成",
+    "upscale": "整理输出",
+}
 
 
 class Task:
@@ -116,6 +122,9 @@ class Task:
 
     def to_public_dict(self) -> dict:
         data = self.to_dict()
+        current_step, current_step_label = self.current_step()
+        data["current_step"] = current_step
+        data["current_step_label"] = current_step_label
         for key in ["model_file", "dress_file", "face_file", "pose_reference_file"]:
             if data.get(key):
                 data[key] = os.path.basename(data[key])
@@ -125,6 +134,29 @@ class Task:
             if path and os.path.exists(self.resolve_storage_path(path))
         }
         return data
+
+    def current_step(self) -> tuple[str, str]:
+        ordered_steps = ("dress", "face", "scene", "upscale")
+
+        if self.status == TaskStatus.PROCESSING:
+            for step_name in ordered_steps:
+                if self.steps.get(step_name) == StepStatus.PROCESSING:
+                    return step_name, STEP_LABELS.get(step_name, step_name)
+            return "processing", "生成中"
+
+        if self.status == TaskStatus.PENDING:
+            return "queued", "等待队列"
+
+        if self.status == TaskStatus.COMPLETED:
+            return "completed", "已完成"
+
+        if self.status == TaskStatus.FAILED:
+            for step_name in ordered_steps:
+                if self.steps.get(step_name) == StepStatus.FAILED:
+                    return step_name, f"{STEP_LABELS.get(step_name, step_name)}失败"
+            return "failed", "生成失败"
+
+        return self.status.value, self.status.value
 
     @classmethod
     def from_dict(cls, data: dict) -> "Task":

@@ -55,6 +55,19 @@ cd ..
 http://127.0.0.1:8000
 ```
 
+## 验证命令
+
+提交或演示前建议至少跑下面两项：
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s backend\tests -v
+cd frontend
+npm run build
+cd ..
+```
+
+当前任务列表会返回 `current_step` 和 `current_step_label`，前端会直接展示“等待队列 / AI试衣 / 场景生成 / 整理输出 / 已完成 / 失败步骤”，便于演示和排查。
+
 ## 常用接口
 
 | 接口 | 方法 | 说明 |
