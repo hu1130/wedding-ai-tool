@@ -11,6 +11,7 @@ import {
   Play,
   RefreshCw,
   Sparkles,
+  Star,
   Trash2,
   UploadCloud,
   WandSparkles,
@@ -44,6 +45,8 @@ type Task = {
   generation_mode?: "stable" | "creative";
   parent_task_id?: string | null;
   rerun_index?: number;
+  is_deliverable?: boolean;
+  deliverable_at?: string;
   current_step?: string;
   current_step_label?: string;
   output_files: Record<string, boolean>;
@@ -243,6 +246,15 @@ const api = {
     const data = await readApiJson<{ task_id: string; rerun_index: number }>(response, "重跑任务失败");
     return data;
   },
+  async markDeliverable(taskId: string, isDeliverable: boolean) {
+    const response = await fetch(`/api/task/${taskId}/deliverable`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_deliverable: isDeliverable }),
+    });
+    const data = await readApiJson<{ task: Task }>(response, "更新交付标记失败");
+    return data.task;
+  },
   async deleteTask(taskId: string) {
     const response = await fetch(`/api/task/${taskId}`, { method: "DELETE" });
     return readApiJson<{ removed_dirs: number; removed_files: number; success: boolean }>(
@@ -329,6 +341,7 @@ export function App() {
   const [creating, setCreating] = useState(false);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const [rerunningTaskId, setRerunningTaskId] = useState<string | null>(null);
+  const [markingTaskId, setMarkingTaskId] = useState<string | null>(null);
 
   const selectedScene = useMemo(
     () => scenes.find((item) => item.value === scene) || scenes[0],
@@ -568,7 +581,33 @@ export function App() {
     }
   }
 
+  async function handleToggleDeliverable(task: Task) {
+    const nextValue = !task.is_deliverable;
+    if (nextValue && (task.status !== "completed" || !task.output_files?.final)) {
+      setToast("只有已完成并生成最终图的任务可以标记为可交付");
+      return;
+    }
+
+    setMarkingTaskId(task.task_id);
+    try {
+      const updatedTask = await api.markDeliverable(task.task_id, nextValue);
+      setTasks((current) =>
+        current.map((item) => (item.task_id === updatedTask.task_id ? updatedTask : item)),
+      );
+      setSelectedTask((current) =>
+        current?.task_id === updatedTask.task_id ? updatedTask : current,
+      );
+      setToast(nextValue ? "已标记为可交付" : "已取消可交付标记");
+      await fetchTasks();
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "更新交付标记失败");
+    } finally {
+      setMarkingTaskId(null);
+    }
+  }
+
   const completedCount = tasks.filter((task) => task.status === "completed").length;
+  const deliverableCount = tasks.filter((task) => task.is_deliverable).length;
   const activeCount = tasks.filter((task) => ["pending", "processing"].includes(task.status)).length;
 
   return (
@@ -610,7 +649,8 @@ export function App() {
         <MetricCard label="后端状态" value={health === "ok" ? "已连接" : health === "down" ? "未连接" : "检测中"} tone={health} />
         <MetricCard label="任务总数" value={String(tasks.length)} tone="neutral" />
         <MetricCard label="进行中" value={String(activeCount)} tone="processing" />
-        <MetricCard label="已交付" value={String(completedCount)} tone="completed" />
+        <MetricCard label="已完成" value={String(completedCount)} tone="completed" />
+        <MetricCard label="可交付" value={String(deliverableCount)} tone="deliverable" />
       </section>
 
       <section className="workspace-grid">
@@ -918,6 +958,12 @@ export function App() {
                       <strong>
                         {taskDisplayName(task)}
                         <span className="version-badge">{taskVersionLabel(task)}</span>
+                        {task.is_deliverable && (
+                          <span className="deliverable-badge">
+                            <Star size={12} />
+                            可交付
+                          </span>
+                        )}
                       </strong>
                       <span className={task.status === "failed" ? "task-subline failed" : "task-subline"} title={taskLine}>
                         {taskLine}
@@ -947,12 +993,14 @@ export function App() {
       {selectedTask && (
         <ResultDialog
           deleting={deletingTaskId === selectedTask.task_id}
+          markingDeliverable={markingTaskId === selectedTask.task_id}
           rerunning={rerunningTaskId === selectedTask.task_id}
           task={selectedTask}
           versions={selectedVersions}
           onClose={() => setSelectedTask(null)}
           onDelete={handleDeleteTask}
           onRerun={handleRerunTask}
+          onToggleDeliverable={handleToggleDeliverable}
           onSelectVersion={setSelectedTask}
         />
       )}
@@ -1003,7 +1051,7 @@ function MetricCard({
 }: {
   label: string;
   value: string;
-  tone: "ok" | "down" | "checking" | "neutral" | "processing" | "completed";
+  tone: "ok" | "down" | "checking" | "neutral" | "processing" | "completed" | "deliverable";
 }) {
   return (
     <div className={`metric-card ${tone}`}>
@@ -1139,21 +1187,25 @@ function AssetLibraryPanel({
 
 function ResultDialog({
   deleting,
+  markingDeliverable,
   rerunning,
   task,
   versions,
   onClose,
   onDelete,
   onRerun,
+  onToggleDeliverable,
   onSelectVersion,
 }: {
   deleting: boolean;
+  markingDeliverable: boolean;
   rerunning: boolean;
   task: Task;
   versions: Task[];
   onClose: () => void;
   onDelete: (task: Task) => void;
   onRerun: (task: Task) => void;
+  onToggleDeliverable: (task: Task) => void;
   onSelectVersion: (task: Task) => void;
 }) {
   const sceneInfo = taskSceneSummary(task);
@@ -1181,6 +1233,12 @@ function ResultDialog({
               <StatusIcon status={task.status} />
               {statusCopy[task.status]}
             </span>
+            {task.is_deliverable && (
+              <span className="deliverable-badge dialog-deliverable-badge">
+                <Star size={12} />
+                可交付
+              </span>
+            )}
             <h2>{taskDisplayName(task)}</h2>
           </div>
           <button onClick={onClose} aria-label="关闭结果">
@@ -1233,7 +1291,10 @@ function ResultDialog({
                   type="button"
                 >
                   <span>{taskVersionLabel(version)}</span>
-                  <small>{statusCopy[version.status]}</small>
+                  <small>
+                    {statusCopy[version.status]}
+                    {version.is_deliverable ? " / 可交付" : ""}
+                  </small>
                 </button>
               ))}
             </div>
@@ -1298,6 +1359,18 @@ function ResultDialog({
         </div>
 
         <div className="dialog-actions">
+          <button
+            className={task.is_deliverable ? "deliverable-button active" : "deliverable-button"}
+            disabled={
+              markingDeliverable ||
+              ((task.status !== "completed" || !task.output_files?.final) && !task.is_deliverable)
+            }
+            onClick={() => onToggleDeliverable(task)}
+            type="button"
+          >
+            {markingDeliverable ? <Loader2 size={18} className="spin" /> : <Star size={18} />}
+            {task.is_deliverable ? "取消可交付" : "设为可交付"}
+          </button>
           {task.output_files?.final && (
             <a className="download-button" href={`/api/task/${task.task_id}/result`} download>
               <ArrowDownToLine size={18} />

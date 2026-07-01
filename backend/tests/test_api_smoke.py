@@ -104,6 +104,43 @@ class ApiSmokeTest(unittest.TestCase):
         self.assertEqual(200, input_response.status_code)
         self.assertEqual("image/png", input_response.headers["content-type"])
 
+    def test_mark_and_unmark_deliverable(self):
+        mark_response = self.client.patch(
+            f"/api/task/{self.task_id}/deliverable",
+            json={"is_deliverable": True},
+        )
+        self.assertEqual(200, mark_response.status_code)
+        marked_task = mark_response.json()["task"]
+        self.assertTrue(marked_task["is_deliverable"])
+        self.assertTrue(marked_task["deliverable_at"])
+
+        tasks_response = self.client.get("/api/tasks")
+        self.assertTrue(tasks_response.json()["tasks"][0]["is_deliverable"])
+
+        unmark_response = self.client.patch(
+            f"/api/task/{self.task_id}/deliverable",
+            json={"is_deliverable": False},
+        )
+        self.assertEqual(200, unmark_response.status_code)
+        unmarked_task = unmark_response.json()["task"]
+        self.assertFalse(unmarked_task["is_deliverable"])
+        self.assertEqual("", unmarked_task["deliverable_at"])
+
+    def test_rejects_deliverable_without_final_output(self):
+        task = Task(
+            task_id=f"draft_{self.test_id}",
+            name="draft",
+            model_file=self.model,
+            dress_file=self.dress,
+        )
+        task.save()
+
+        response = self.client.patch(
+            f"/api/task/{task.task_id}/deliverable",
+            json={"is_deliverable": True},
+        )
+        self.assertEqual(409, response.status_code)
+
 
 if __name__ == "__main__":
     unittest.main()

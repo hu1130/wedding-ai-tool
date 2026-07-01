@@ -1,6 +1,7 @@
 """任务管理接口"""
 import os
 import shutil
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -139,6 +140,10 @@ class BatchCreateRequest(BaseModel):
     tasks: list[CreateTaskRequest]
 
 
+class DeliverableRequest(BaseModel):
+    is_deliverable: bool = True
+
+
 def _build_task(req: CreateTaskRequest) -> Task:
     scene_prompt = (req.scene_prompt or "").strip()
     pose = (req.pose or STABLE_POSE).strip() or STABLE_POSE
@@ -238,6 +243,26 @@ async def get_task(task_id: str):
     task = Task.get(task_id)
     if not task:
         raise HTTPException(404, detail="任务不存在")
+    return {"success": True, "task": task.to_public_dict()}
+
+
+@router.patch("/task/{task_id}/deliverable")
+async def update_task_deliverable(task_id: str, req: DeliverableRequest):
+    """标记或取消标记最终图是否可交付。"""
+    task = Task.get(task_id)
+    if not task:
+        raise HTTPException(404, detail="任务不存在")
+
+    if req.is_deliverable:
+        final_path = task.output_files.get("final")
+        final_exists = bool(final_path and os.path.isfile(Task.resolve_storage_path(final_path)))
+        if task.status.value != "completed" or not final_exists:
+            raise HTTPException(409, detail="只有已完成且最终图文件存在的任务可以标记为可交付")
+
+    task.is_deliverable = req.is_deliverable
+    task.deliverable_at = datetime.now().isoformat() if req.is_deliverable else ""
+    task.save()
+
     return {"success": True, "task": task.to_public_dict()}
 
 

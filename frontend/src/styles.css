@@ -216,7 +216,7 @@ h1 {
 
 .status-row {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 14px;
   margin-bottom: 18px;
 }
@@ -248,6 +248,10 @@ h1 {
 
 .metric-card.processing strong {
   color: var(--gold);
+}
+
+.metric-card.deliverable strong {
+  color: #936522;
 }
 
 .workspace-grid {
@@ -938,6 +942,25 @@ h1 {
   white-space: nowrap;
 }
 
+.deliverable-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  color: #7b541f;
+  background: #fff0c9;
+  border: 1px solid rgba(185, 138, 73, 0.34);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.task-main .deliverable-badge {
+  color: #7b541f;
+  overflow: visible;
+}
+
 .task-main .task-subline.failed {
   color: var(--danger);
 }
@@ -986,6 +1009,11 @@ h1 {
 
 .dialog-head h2 {
   margin-top: 12px;
+}
+
+.dialog-deliverable-badge {
+  margin-left: 8px;
+  vertical-align: middle;
 }
 
 .task-config-strip {
@@ -1240,6 +1268,26 @@ h1 {
   cursor: pointer;
 }
 
+.deliverable-button {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 18px;
+  border-radius: 8px;
+  color: #7b541f;
+  background: #fff7df;
+  border: 1px solid rgba(185, 138, 73, 0.38);
+  cursor: pointer;
+}
+
+.deliverable-button.active {
+  color: #fffdf9;
+  background: #7b541f;
+  border-color: #7b541f;
+}
+
 .rerun-button {
   min-height: 44px;
   display: inline-flex;
@@ -1259,7 +1307,17 @@ h1 {
   background: #fff8ef;
 }
 
-.rerun-button:disabled {
+.deliverable-button:hover {
+  border-color: var(--gold);
+  background: #fff0c9;
+}
+
+.deliverable-button.active:hover {
+  background: #654316;
+}
+
+.rerun-button:disabled,
+.deliverable-button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
@@ -1320,6 +1378,10 @@ h1 {
   .hero-panel,
   .workspace-grid {
     grid-template-columns: 1fr;
+  }
+
+  .status-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .process-rail {

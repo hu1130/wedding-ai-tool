@@ -58,6 +58,8 @@ class Task:
         generation_mode: str = "stable",
         parent_task_id: Optional[str] = None,
         rerun_index: int = 1,
+        is_deliverable: bool = False,
+        deliverable_at: str = "",
     ):
         self.task_id = task_id or uuid.uuid4().hex[:12]
         self.name = name or f"任务_{self.task_id}"
@@ -78,6 +80,8 @@ class Task:
         self.generation_mode = generation_mode
         self.parent_task_id = parent_task_id
         self.rerun_index = rerun_index
+        self.is_deliverable = is_deliverable
+        self.deliverable_at = deliverable_at
         self.output_files = {}
         self.error_message = ""
         self.created_at = datetime.now().isoformat()
@@ -110,6 +114,8 @@ class Task:
             "generation_mode": self.generation_mode,
             "parent_task_id": self.parent_task_id,
             "rerun_index": self.rerun_index,
+            "is_deliverable": self.is_deliverable,
+            "deliverable_at": self.deliverable_at,
             "output_files": {
                 key: self.to_storage_path(path)
                 for key, path in self.output_files.items()
@@ -186,6 +192,8 @@ class Task:
             generation_mode=data.get("generation_mode", "stable"),
             parent_task_id=data.get("parent_task_id"),
             rerun_index=rerun_index,
+            is_deliverable=bool(data.get("is_deliverable", False)),
+            deliverable_at=data.get("deliverable_at", ""),
         )
 
         try:
