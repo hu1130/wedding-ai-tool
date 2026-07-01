@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.config import settings
+from backend.models.asset import AssetLibrary
 from backend.models.task import Task
 from backend.services.task_queue import enqueue_task
 from backend.utils.image import resolve_upload_path
@@ -50,6 +51,9 @@ def _remaining_input_paths() -> set[str]:
         for candidate in [task.model_file, task.dress_file, task.face_file, task.pose_reference_file]:
             if candidate:
                 paths.add(os.path.abspath(candidate))
+    for asset in AssetLibrary.list_all():
+        if asset.get("file_id"):
+            paths.add(os.path.abspath(AssetLibrary.resolve_file_path(asset["file_id"])))
     return paths
 
 

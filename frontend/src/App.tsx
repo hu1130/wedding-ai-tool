@@ -22,6 +22,7 @@ type UploadSlot = "model" | "dress" | "face" | "poseReference";
 type TaskStatus = "pending" | "processing" | "completed" | "failed";
 type PoseMode = "stable" | "light" | "experimental";
 type ClothingType = "wedding_gown";
+type AssetCategory = "model" | "dress" | "face" | "pose_reference";
 
 type Task = {
   task_id: string;
@@ -54,13 +55,41 @@ type Task = {
 
 type UploadState = {
   fileId: string | null;
+  assetId: string | null;
   previewUrl: string | null;
   filename: string | null;
   uploading: boolean;
 };
 
+type LibraryAsset = {
+  asset_id: string;
+  category: AssetCategory;
+  file_id: string;
+  filename: string;
+  created_at: string;
+  image_url: string;
+};
+
+type CreateTaskPayload = {
+  name?: string;
+  model_file: string;
+  dress_file: string;
+  face_file?: string | null;
+  pose_reference_file?: string | null;
+  clothing_type: ClothingType;
+  scene: string;
+  scene_prompt?: string;
+  resolution: string;
+  face_swap: boolean;
+  pose: string;
+  pose_mode: PoseMode;
+  preserve_face: boolean;
+  generation_mode: "stable" | "creative";
+};
+
 const emptyUpload: UploadState = {
   fileId: null,
+  assetId: null,
   previewUrl: null,
   filename: null,
   uploading: false,
@@ -125,6 +154,15 @@ const slotCopy: Record<UploadSlot, { title: string; subtitle: string; required: 
   },
 };
 
+const assetCategoryBySlot: Record<UploadSlot, AssetCategory> = {
+  model: "model",
+  dress: "dress",
+  face: "face",
+  poseReference: "pose_reference",
+};
+
+const librarySlots: UploadSlot[] = ["model", "dress", "poseReference", "face"];
+
 const statusCopy: Record<TaskStatus, string> = {
   pending: "等待中",
   processing: "生成中",
@@ -160,28 +198,15 @@ const api = {
     const response = await fetch("/api/health");
     return readApiJson(response, "后端连接失败");
   },
-  async upload(file: File) {
+  async upload(file: File, category: AssetCategory) {
     const form = new FormData();
     form.append("file", file);
+    form.append("category", category);
     const response = await fetch("/api/upload", { method: "POST", body: form });
-    const data = await readApiJson<{ file_id?: string; file_path?: string }>(response, "上传失败");
-    return data.file_id || data.file_path;
+    const data = await readApiJson<{ file_id?: string; file_path?: string; asset?: LibraryAsset }>(response, "上传失败");
+    return { fileId: data.file_id || data.file_path, asset: data.asset };
   },
-  async createTask(payload: {
-    model_file: string;
-    dress_file: string;
-    face_file?: string | null;
-    pose_reference_file?: string | null;
-    clothing_type: ClothingType;
-    scene: string;
-    scene_prompt?: string;
-    resolution: string;
-    face_swap: boolean;
-    pose: string;
-    pose_mode: PoseMode;
-    preserve_face: boolean;
-    generation_mode: "stable" | "creative";
-  }) {
+  async createTask(payload: CreateTaskPayload) {
     const response = await fetch("/api/create-task", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -190,10 +215,28 @@ const api = {
     const data = await readApiJson<{ task_id: string }>(response, "创建任务失败");
     return data.task_id as string;
   },
+  async batchCreate(payloads: CreateTaskPayload[]) {
+    const response = await fetch("/api/batch-create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tasks: payloads }),
+    });
+    return readApiJson<{ task_ids: string[]; count: number }>(response, "批量创建任务失败");
+  },
   async tasks() {
     const response = await fetch("/api/tasks?page=1&page_size=50");
     const data = await readApiJson<{ tasks: Task[] }>(response, "任务列表获取失败");
     return data.tasks as Task[];
+  },
+  async assets(category?: AssetCategory) {
+    const query = category ? `?category=${encodeURIComponent(category)}` : "";
+    const response = await fetch(`/api/assets${query}`);
+    const data = await readApiJson<{ assets: LibraryAsset[] }>(response, "素材库获取失败");
+    return data.assets;
+  },
+  async deleteAsset(assetId: string) {
+    const response = await fetch(`/api/assets/${assetId}`, { method: "DELETE" });
+    return readApiJson<{ success: boolean }>(response, "删除素材失败");
   },
   async rerunTask(taskId: string) {
     const response = await fetch(`/api/task/${taskId}/rerun`, { method: "POST" });
@@ -275,8 +318,11 @@ export function App() {
   const [preserveFace, setPreserveFace] = useState(true);
   const [generationMode, setGenerationMode] = useState<"stable" | "creative">("stable");
   const [resolution, setResolution] = useState("1k");
+  const [batchCount, setBatchCount] = useState(1);
   const [demoMode, setDemoMode] = useState(true);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [assets, setAssets] = useState<LibraryAsset[]>([]);
+  const [librarySlot, setLibrarySlot] = useState<UploadSlot>("model");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [health, setHealth] = useState<"checking" | "ok" | "down">("checking");
   const [toast, setToast] = useState<string | null>(null);
@@ -317,15 +363,25 @@ export function App() {
     }
   }, []);
 
+  const fetchAssets = useCallback(async () => {
+    try {
+      const nextAssets = await api.assets();
+      setAssets(nextAssets);
+    } catch (error) {
+      console.error(error);
+    }
+  }, []);
+
   useEffect(() => {
     api
       .health()
       .then(() => setHealth("ok"))
       .catch(() => setHealth("down"));
     fetchTasks();
+    fetchAssets();
     const timer = window.setInterval(fetchTasks, 3000);
     return () => window.clearInterval(timer);
-  }, [fetchTasks]);
+  }, [fetchAssets, fetchTasks]);
 
   useEffect(() => {
     if (!demoMode) return;
@@ -356,15 +412,23 @@ export function App() {
     const previewUrl = URL.createObjectURL(file);
     setUploads((current) => ({
       ...current,
-      [slot]: { fileId: null, previewUrl, filename: file.name, uploading: true },
+      [slot]: { fileId: null, assetId: null, previewUrl, filename: file.name, uploading: true },
     }));
 
     try {
-      const fileId = await api.upload(file);
+      const { fileId, asset } = await api.upload(file, assetCategoryBySlot[slot]);
+      if (!fileId) throw new Error("上传失败：后端没有返回文件 ID");
       setUploads((current) => ({
         ...current,
-        [slot]: { fileId, previewUrl, filename: file.name, uploading: false },
+        [slot]: {
+          fileId,
+          assetId: asset?.asset_id || null,
+          previewUrl,
+          filename: file.name,
+          uploading: false,
+        },
       }));
+      await fetchAssets();
     } catch (error) {
       URL.revokeObjectURL(previewUrl);
       setUploads((current) => ({ ...current, [slot]: emptyUpload }));
@@ -372,41 +436,92 @@ export function App() {
     }
   }
 
-  async function createTask() {
+  function buildTaskPayload(name?: string): CreateTaskPayload | null {
     const modelFile = uploads.model.fileId;
     const dressFile = uploads.dress.fileId;
     if (!modelFile || !dressFile) {
-      setToast("请先上传模特原图和婚纱图片");
-      return;
+      setToast("请先上传或选择模特原图和婚纱图片");
+      return null;
     }
     if (scene === "自定义背景" && !scenePrompt) {
       setToast("请填写自定义背景描述，或选择一个预设背景");
-      return;
+      return null;
     }
+
+    return {
+      name,
+      model_file: modelFile,
+      dress_file: dressFile,
+      face_file: uploads.face.fileId,
+      pose_reference_file: uploads.poseReference.fileId,
+      clothing_type: clothingType,
+      scene,
+      scene_prompt: scenePrompt,
+      resolution,
+      face_swap: false,
+      pose: posePrompt,
+      pose_mode: poseMode,
+      preserve_face: preserveFace,
+      generation_mode: generationMode,
+    };
+  }
+
+  async function createTask() {
+    const payload = buildTaskPayload();
+    if (!payload) return;
 
     setCreating(true);
     try {
-      await api.createTask({
-        model_file: modelFile,
-        dress_file: dressFile,
-        face_file: uploads.face.fileId,
-        pose_reference_file: uploads.poseReference.fileId,
-        clothing_type: clothingType,
-        scene,
-        scene_prompt: scenePrompt,
-        resolution,
-        face_swap: false,
-        pose: posePrompt,
-        pose_mode: poseMode,
-        preserve_face: preserveFace,
-        generation_mode: generationMode,
-      });
-      setToast("任务已提交，正在生成");
+      if (batchCount > 1) {
+        const batchPayloads = Array.from({ length: batchCount }, (_, index) => ({
+          ...payload,
+          name: `${payload.name || "批量任务"} ${index + 1}/${batchCount}`,
+        }));
+        const result = await api.batchCreate(batchPayloads);
+        setToast(`已创建 ${result.count} 个生成任务`);
+      } else {
+        await api.createTask(payload);
+        setToast("任务已提交，正在生成");
+      }
       await fetchTasks();
     } catch (error) {
       setToast(error instanceof Error ? error.message : "创建任务失败");
     } finally {
       setCreating(false);
+    }
+  }
+
+  function handleSelectAsset(slot: UploadSlot, asset: LibraryAsset) {
+    setUploads((current) => ({
+      ...current,
+      [slot]: {
+        fileId: asset.file_id,
+        assetId: asset.asset_id,
+        previewUrl: asset.image_url,
+        filename: asset.filename,
+        uploading: false,
+      },
+    }));
+    setToast(`已选择${slotCopy[slot].title}`);
+  }
+
+  async function handleDeleteAsset(asset: LibraryAsset) {
+    const ok = window.confirm(`确定从素材库移除“${asset.filename}”吗？不会删除已生成任务。`);
+    if (!ok) return;
+
+    try {
+      await api.deleteAsset(asset.asset_id);
+      setAssets((current) => current.filter((item) => item.asset_id !== asset.asset_id));
+      setUploads((current) => {
+        const next = { ...current };
+        for (const slot of Object.keys(next) as UploadSlot[]) {
+          if (next[slot].assetId === asset.asset_id) next[slot] = emptyUpload;
+        }
+        return next;
+      });
+      setToast("素材已从素材库移除");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "删除素材失败");
     }
   }
 
@@ -471,7 +586,7 @@ export function App() {
           <div className="hero-actions">
             <button className="primary-action" onClick={createTask} disabled={creating}>
               {creating ? <Loader2 size={18} className="spin" /> : <Play size={18} />}
-              开始生成
+              {batchCount > 1 ? `批量生成 ${batchCount} 张` : "开始生成"}
             </button>
             <button className="ghost-action" onClick={fetchTasks}>
               <RefreshCw size={17} />
@@ -517,6 +632,13 @@ export function App() {
               />
             ))}
           </div>
+          <AssetLibraryPanel
+            assets={assets}
+            activeSlot={librarySlot}
+            onDelete={handleDeleteAsset}
+            onSelect={handleSelectAsset}
+            onSlotChange={setLibrarySlot}
+          />
         </div>
 
         <div className="panel settings-panel">
@@ -660,6 +782,25 @@ export function App() {
                   disabled={demoMode && item !== "1k"}
                 >
                   {item.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="setting-line">
+            <div>
+              <label>生成数量</label>
+              <p>{batchCount === 1 ? "创建单个任务" : `一次创建 ${batchCount} 个版本，用于批量挑片`}</p>
+            </div>
+            <div className="segmented">
+              {[1, 3, 5].map((item) => (
+                <button
+                  key={item}
+                  className={batchCount === item ? "active" : ""}
+                  onClick={() => setBatchCount(item)}
+                  type="button"
+                >
+                  {item} 张
                 </button>
               ))}
             </div>
@@ -920,6 +1061,79 @@ function UploadCard({
         {state.uploading ? <Loader2 size={18} className="spin" /> : state.fileId ? <CheckCircle2 size={18} /> : null}
       </div>
     </label>
+  );
+}
+
+function AssetLibraryPanel({
+  activeSlot,
+  assets,
+  onDelete,
+  onSelect,
+  onSlotChange,
+}: {
+  activeSlot: UploadSlot;
+  assets: LibraryAsset[];
+  onDelete: (asset: LibraryAsset) => void;
+  onSelect: (slot: UploadSlot, asset: LibraryAsset) => void;
+  onSlotChange: (slot: UploadSlot) => void;
+}) {
+  const activeCategory = assetCategoryBySlot[activeSlot];
+  const visibleAssets = assets.filter((asset) => asset.category === activeCategory);
+
+  return (
+    <div className="asset-library">
+      <div className="asset-library-head">
+        <div>
+          <span className="section-kicker">素材库</span>
+          <strong>上传过的素材可以直接复用</strong>
+        </div>
+        <span>{visibleAssets.length} 个</span>
+      </div>
+      <div className="library-tabs">
+        {librarySlots.map((slot) => (
+          <button
+            className={activeSlot === slot ? "active" : ""}
+            key={slot}
+            onClick={() => onSlotChange(slot)}
+            type="button"
+          >
+            {slotCopy[slot].title}
+          </button>
+        ))}
+      </div>
+      {visibleAssets.length === 0 ? (
+        <div className="library-empty">当前分类还没有素材，上传后会自动保存到这里。</div>
+      ) : (
+        <div className="asset-grid">
+          {visibleAssets.slice(0, 12).map((asset) => (
+            <div className="asset-card" key={asset.asset_id}>
+              <ResultImage
+                src={asset.image_url}
+                alt={asset.filename}
+                fallback="素材无法读取"
+              />
+              <div>
+                <strong title={asset.filename}>{asset.filename}</strong>
+                <span>{new Date(asset.created_at).toLocaleString()}</span>
+              </div>
+              <div className="asset-actions">
+                <button type="button" onClick={() => onSelect(activeSlot, asset)}>
+                  使用
+                </button>
+                <button
+                  aria-label="从素材库移除"
+                  className="asset-delete"
+                  type="button"
+                  onClick={() => onDelete(asset)}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

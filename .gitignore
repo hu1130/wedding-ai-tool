@@ -13,6 +13,7 @@ uploads/
 outputs/
 backend/tasks.json
 backend/tasks.json.bak-*
+backend/assets.json
 server.log
 server.err.log
 server.pid

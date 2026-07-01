@@ -284,6 +284,121 @@ h1 {
   gap: 14px;
 }
 
+.asset-library {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.asset-library-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.asset-library-head strong {
+  display: block;
+  margin-top: 4px;
+}
+
+.asset-library-head > span,
+.library-empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.library-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.library-tabs button,
+.asset-actions button {
+  min-height: 36px;
+  border-radius: 8px;
+  background: #f4eee6;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.library-tabs button.active,
+.asset-actions button:first-child {
+  color: #fffdf9;
+  background: var(--ink);
+}
+
+.library-empty {
+  min-height: 78px;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.asset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: 10px;
+}
+
+.asset-card {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffdf9;
+}
+
+.asset-card img,
+.asset-card .result-empty {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #f4eee6;
+}
+
+.asset-card strong,
+.asset-card span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-card strong {
+  font-size: 13px;
+}
+
+.asset-card span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.asset-actions {
+  display: grid;
+  grid-template-columns: 1fr 36px;
+  gap: 6px;
+}
+
+.asset-actions .asset-delete {
+  display: grid;
+  place-items: center;
+  color: var(--danger);
+  background: #fff8f6;
+  border: 1px solid rgba(184, 74, 67, 0.2);
+}
+
 .upload-card {
   min-height: 164px;
   display: grid;

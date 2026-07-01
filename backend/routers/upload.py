@@ -1,13 +1,17 @@
 """上传接口"""
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 
+from backend.models.asset import AssetLibrary
 from backend.utils.image import save_upload, validate_image
 
 router = APIRouter(prefix="/api", tags=["上传"])
 
 
 @router.post("/upload")
-async def upload_image(file: UploadFile = File(...)):
+async def upload_image(
+    file: UploadFile = File(...),
+    category: str = Form("uncategorized"),
+):
     """
     上传图片素材
     支持: jpg, jpeg, png, webp
@@ -28,9 +32,12 @@ async def upload_image(file: UploadFile = File(...)):
     except ValueError as exc:
         raise HTTPException(400, detail=str(exc)) from exc
 
+    asset = AssetLibrary.create(file_id=file_id, filename=file.filename, category=category)
+
     return {
         "success": True,
         "file_id": file_id,
         "file_path": file_id,
         "filename": file.filename,
+        "asset": asset,
     }

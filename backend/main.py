@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.config import settings
-from backend.routers import upload, task, result
+from backend.routers import upload, task, result, asset
 from backend.services.task_queue import init_queue
 
 allowed_origins = [
@@ -57,6 +57,7 @@ app.add_middleware(
 app.include_router(upload.router)
 app.include_router(task.router)
 app.include_router(result.router)
+app.include_router(asset.router)
 
 
 @app.get("/api/health")
