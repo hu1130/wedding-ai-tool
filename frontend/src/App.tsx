@@ -166,6 +166,7 @@ const assetCategoryBySlot: Record<UploadSlot, AssetCategory> = {
 };
 
 const librarySlots: UploadSlot[] = ["model", "dress", "poseReference", "face"];
+const hashFilenamePattern = /^[0-9a-f]{24,}\.(png|jpe?g|webp)$/i;
 
 const statusCopy: Record<TaskStatus, string> = {
   pending: "等待中",
@@ -335,6 +336,21 @@ function failureAdvice(message: string) {
     return "稍后重跑；如果连续超时，检查网络和 DashScope 任务状态。";
   }
   return "先重跑一版；如果持续失败，换更清晰的素材或检查后端日志。";
+}
+
+function formatAssetDate(value: string) {
+  const time = new Date(value);
+  if (Number.isNaN(time.getTime())) return "";
+  return time.toLocaleDateString();
+}
+
+function assetDisplayName(asset: LibraryAsset, slot: UploadSlot) {
+  const filename = asset.filename || asset.file_id;
+  if (!hashFilenamePattern.test(filename)) return filename;
+
+  const date = formatAssetDate(asset.created_at);
+  const shortId = asset.file_id.slice(0, 8);
+  return `${slotCopy[slot].title}${date ? ` ${date}` : ""} #${shortId}`;
 }
 
 export function App() {
@@ -1235,32 +1251,44 @@ function AssetLibraryPanel({
         <div className="library-empty">当前分类还没有素材，上传后会自动保存到这里。</div>
       ) : (
         <div className="asset-grid">
-          {visibleAssets.slice(0, 12).map((asset) => (
-            <div className="asset-card" key={asset.asset_id}>
-              <ResultImage
-                src={asset.image_url}
-                alt={asset.filename}
-                fallback="素材无法读取"
-              />
-              <div>
-                <strong title={asset.filename}>{asset.filename}</strong>
-                <span>{new Date(asset.created_at).toLocaleString()}</span>
-              </div>
-              <div className="asset-actions">
-                <button type="button" onClick={() => onSelect(activeSlot, asset)}>
-                  使用
-                </button>
+          {visibleAssets.slice(0, 18).map((asset) => {
+            const displayName = assetDisplayName(asset, activeSlot);
+            const shortId = asset.file_id.slice(0, 8);
+
+            return (
+              <div className="asset-card" key={asset.asset_id}>
                 <button
-                  aria-label="从素材库移除"
-                  className="asset-delete"
+                  className="asset-preview-button"
+                  onClick={() => onSelect(activeSlot, asset)}
+                  title={`使用 ${displayName}`}
                   type="button"
-                  onClick={() => onDelete(asset)}
                 >
-                  <Trash2 size={14} />
+                  <ResultImage
+                    src={asset.image_url}
+                    alt={displayName}
+                    fallback="素材无法读取"
+                  />
                 </button>
+                <div>
+                  <strong title={asset.filename}>{displayName}</strong>
+                  <span title={asset.file_id}>素材编号 #{shortId}</span>
+                </div>
+                <div className="asset-actions">
+                  <button type="button" onClick={() => onSelect(activeSlot, asset)}>
+                    使用
+                  </button>
+                  <button
+                    aria-label="从素材库移除"
+                    className="asset-delete"
+                    type="button"
+                    onClick={() => onDelete(asset)}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

@@ -350,25 +350,37 @@ h1 {
 
 .asset-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 10px;
 }
 
 .asset-card {
   display: grid;
   gap: 8px;
+  min-width: 0;
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fffdf9;
 }
 
+.asset-preview-button {
+  width: 100%;
+  display: block;
+  padding: 0;
+  border-radius: 6px;
+  background: #f4eee6;
+  cursor: pointer;
+  overflow: hidden;
+}
+
 .asset-card img,
 .asset-card .result-empty {
   width: 100%;
-  aspect-ratio: 1;
+  display: block;
+  aspect-ratio: 4 / 5;
   border-radius: 6px;
-  object-fit: cover;
+  object-fit: contain;
   background: #f4eee6;
 }
 
