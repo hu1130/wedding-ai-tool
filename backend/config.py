@@ -1,6 +1,38 @@
 """配置管理"""
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _strip_env_quotes(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def load_env_files() -> None:
+    """Load local .env files without overriding real environment variables."""
+    for path in (PROJECT_ROOT / ".env", PROJECT_ROOT / "backend" / ".env"):
+        if not path.exists():
+            continue
+        with open(path, "r", encoding="utf-8-sig") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+
+                key, value = line.split("=", 1)
+                key = key.strip()
+                if not key or key in os.environ:
+                    continue
+                os.environ[key] = _strip_env_quotes(value)
+
+
+load_env_files()
 
 
 @dataclass

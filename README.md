@@ -30,7 +30,14 @@ python -m venv .venv
 
 ### 2. 配置阿里云 DashScope Key
 
-复制 `.env.example` 后填入自己的 Key，或者直接在终端设置环境变量：
+复制 `.env.example` 为 `.env` 后填入自己的 Key。后端启动时会自动读取项目根目录的 `.env`，真实 `.env` 已被 `.gitignore` 排除，不会提交到 GitHub。
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+也可以直接在当前终端设置临时环境变量：
 
 ```powershell
 $env:ALIYUN_DASHSCOPE_API_KEY="你的 DashScope API Key"
