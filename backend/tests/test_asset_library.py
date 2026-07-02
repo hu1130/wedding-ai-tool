@@ -15,6 +15,7 @@ else:
 
 from backend.config import settings
 from backend.models.asset import AssetLibrary
+from backend.models.task import Task
 from PIL import Image
 
 
@@ -30,8 +31,10 @@ class AssetLibraryApiTest(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.old_upload_dir = settings.upload_dir
         self.old_data_file = AssetLibrary.DATA_FILE
+        self.old_task_data_file = Task.DATA_FILE
         settings.upload_dir = os.path.join(self.temp_dir.name, "uploads")
         AssetLibrary.DATA_FILE = os.path.join(self.temp_dir.name, "assets.json")
+        Task.DATA_FILE = os.path.join(self.temp_dir.name, "tasks.json")
 
         from backend.routers import asset as asset_router
         from backend.routers import upload as upload_router
@@ -44,6 +47,7 @@ class AssetLibraryApiTest(unittest.TestCase):
     def tearDown(self):
         settings.upload_dir = self.old_upload_dir
         AssetLibrary.DATA_FILE = self.old_data_file
+        Task.DATA_FILE = self.old_task_data_file
         self.temp_dir.cleanup()
 
     def test_upload_registers_asset_and_serves_image(self):
@@ -74,6 +78,38 @@ class AssetLibraryApiTest(unittest.TestCase):
 
         uploaded_path = os.path.join(settings.upload_dir, payload["file_id"])
         self.assertTrue(os.path.exists(uploaded_path))
+
+    def test_asset_list_backfills_historical_task_uploads(self):
+        os.makedirs(settings.upload_dir, exist_ok=True)
+        model_path = os.path.join(settings.upload_dir, "legacy_model.png")
+        dress_path = os.path.join(settings.upload_dir, "legacy_dress.png")
+        with open(model_path, "wb") as f:
+            f.write(make_png_bytes())
+        with open(dress_path, "wb") as f:
+            f.write(make_png_bytes())
+
+        task = Task(
+            task_id="legacy_assets",
+            name="legacy assets",
+            model_file=model_path,
+            dress_file=dress_path,
+        )
+        task.save()
+
+        model_response = self.client.get("/api/assets?category=model")
+        self.assertEqual(200, model_response.status_code)
+        model_assets = model_response.json()["assets"]
+        self.assertEqual(1, len(model_assets))
+        self.assertEqual("legacy_model.png", model_assets[0]["file_id"])
+
+        dress_response = self.client.get("/api/assets?category=dress")
+        self.assertEqual(200, dress_response.status_code)
+        dress_assets = dress_response.json()["assets"]
+        self.assertEqual(1, len(dress_assets))
+        self.assertEqual("legacy_dress.png", dress_assets[0]["file_id"])
+
+        second_response = self.client.get("/api/assets")
+        self.assertEqual(2, second_response.json()["total"])
 
 
 if __name__ == "__main__":

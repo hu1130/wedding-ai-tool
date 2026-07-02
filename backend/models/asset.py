@@ -73,6 +73,39 @@ class AssetLibrary:
         return cls.to_public_dict(record)
 
     @classmethod
+    def ensure(
+        cls,
+        file_id: str,
+        filename: Optional[str],
+        category: Optional[str],
+        created_at: Optional[str] = None,
+    ) -> dict:
+        normalized_category = cls.normalize_category(category)
+        normalized_file_id = os.path.basename(file_id or "")
+        if not normalized_file_id:
+            raise ValueError("素材文件 ID 不能为空")
+
+        with cls._FILE_LOCK:
+            records = cls._read_records()
+            for item in records:
+                if (
+                    os.path.basename(item.get("file_id", "")) == normalized_file_id
+                    and cls.normalize_category(item.get("category")) == normalized_category
+                ):
+                    return cls.to_public_dict(item)
+
+            record = {
+                "asset_id": uuid.uuid4().hex[:12],
+                "category": normalized_category,
+                "file_id": normalized_file_id,
+                "filename": filename or normalized_file_id,
+                "created_at": created_at or datetime.now().isoformat(),
+            }
+            records.append(record)
+            cls._write_records(records)
+        return cls.to_public_dict(record)
+
+    @classmethod
     def list_all(cls, category: Optional[str] = None) -> list[dict]:
         normalized_category = cls.normalize_category(category) if category else None
         with cls._FILE_LOCK:
