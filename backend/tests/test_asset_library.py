@@ -111,6 +111,36 @@ class AssetLibraryApiTest(unittest.TestCase):
         second_response = self.client.get("/api/assets")
         self.assertEqual(2, second_response.json()["total"])
 
+    def test_deleted_backfilled_asset_stays_hidden(self):
+        os.makedirs(settings.upload_dir, exist_ok=True)
+        model_path = os.path.join(settings.upload_dir, "legacy_model.png")
+        with open(model_path, "wb") as f:
+            f.write(make_png_bytes())
+
+        task = Task(
+            task_id="legacy_deleted_asset",
+            name="legacy deleted asset",
+            model_file=model_path,
+            dress_file=model_path,
+        )
+        task.save()
+
+        first_response = self.client.get("/api/assets?category=model")
+        self.assertEqual(200, first_response.status_code)
+        model_assets = first_response.json()["assets"]
+        self.assertEqual(1, len(model_assets))
+        asset_id = model_assets[0]["asset_id"]
+
+        delete_response = self.client.delete(f"/api/assets/{asset_id}")
+        self.assertEqual(200, delete_response.status_code)
+
+        second_response = self.client.get("/api/assets?category=model")
+        self.assertEqual(200, second_response.status_code)
+        self.assertEqual([], second_response.json()["assets"])
+
+        image_response = self.client.get(f"/api/assets/{asset_id}/image")
+        self.assertEqual(404, image_response.status_code)
+
 
 if __name__ == "__main__":
     unittest.main()

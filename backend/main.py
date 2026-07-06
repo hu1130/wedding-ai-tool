@@ -6,13 +6,14 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 # Ensure backend package is importable
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.config import settings
-from backend.routers import upload, task, result, asset
+from backend.routers import upload, task, result, asset, quality_review
 from backend.services.task_queue import init_queue
 
 allowed_origins = [
@@ -58,6 +59,7 @@ app.include_router(upload.router)
 app.include_router(task.router)
 app.include_router(result.router)
 app.include_router(asset.router)
+app.include_router(quality_review.router)
 
 
 @app.get("/api/health")
@@ -74,5 +76,34 @@ async def health_check():
 # Static file serving for frontend (must be last - catches all remaining paths)
 frontend_root = Path(__file__).parent.parent / "frontend"
 frontend_dir = frontend_root / "dist" if (frontend_root / "dist").exists() else frontend_root
+
+
+def frontend_index_response():
+    """Serve the SPA entry for browser routes."""
+    index_path = frontend_dir / "index.html"
+    return FileResponse(index_path)
+
+
+@app.get("/works", include_in_schema=False)
+async def frontend_works_route():
+    return frontend_index_response()
+
+
+@app.get("/help", include_in_schema=False)
+async def frontend_help_route():
+    return frontend_index_response()
+
+
+@app.get("/studio", include_in_schema=False)
+async def frontend_studio_route():
+    return frontend_index_response()
+
+
+@app.get("/test", include_in_schema=False)
+async def frontend_test_route():
+    """Serve the SPA entry for the test studio route."""
+    return frontend_index_response()
+
+
 if frontend_dir.exists():
     app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="frontend")

@@ -106,10 +106,12 @@ class AssetLibrary:
         return cls.to_public_dict(record)
 
     @classmethod
-    def list_all(cls, category: Optional[str] = None) -> list[dict]:
+    def list_all(cls, category: Optional[str] = None, include_deleted: bool = False) -> list[dict]:
         normalized_category = cls.normalize_category(category) if category else None
         with cls._FILE_LOCK:
             records = cls._read_records()
+        if not include_deleted:
+            records = [item for item in records if not item.get("deleted_at")]
         if normalized_category:
             records = [item for item in records if item.get("category") == normalized_category]
         return [
@@ -122,7 +124,7 @@ class AssetLibrary:
         with cls._FILE_LOCK:
             records = cls._read_records()
         for item in records:
-            if item.get("asset_id") == asset_id:
+            if item.get("asset_id") == asset_id and not item.get("deleted_at"):
                 return cls.to_public_dict(item)
         return None
 
@@ -131,15 +133,16 @@ class AssetLibrary:
         with cls._FILE_LOCK:
             records = cls._read_records()
             deleted = None
-            remaining = []
-            for item in records:
-                if item.get("asset_id") == asset_id:
+            for index, item in enumerate(records):
+                if item.get("asset_id") == asset_id and not item.get("deleted_at"):
+                    item = dict(item)
+                    item["deleted_at"] = datetime.now().isoformat()
+                    records[index] = item
                     deleted = item
-                else:
-                    remaining.append(item)
+                    break
             if deleted is None:
                 return None
-            cls._write_records(remaining)
+            cls._write_records(records)
         return cls.to_public_dict(deleted)
 
     @classmethod

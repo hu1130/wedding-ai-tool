@@ -34,7 +34,7 @@ def _backfill_assets_from_tasks() -> int:
         ("pose_reference", "pose_reference_file"),
     ]
 
-    existing = AssetLibrary.list_all()
+    existing = AssetLibrary.list_all(include_deleted=True)
     for asset in existing:
         seen.add((asset["category"], asset["file_id"]))
 
