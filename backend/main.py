@@ -1,4 +1,5 @@
 """Wedding AI Tool - FastAPI Entry"""
+import logging
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -13,8 +14,14 @@ from fastapi.staticfiles import StaticFiles
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.config import settings
-from backend.routers import upload, task, result, asset, quality_review
+from backend.logging_config import configure_logging
+from backend.routers import upload, task, result, asset, quality_review, auth
+from backend.services.cleanup import run_cleanup
 from backend.services.task_queue import init_queue
+from backend.storage import database
+
+configure_logging()
+logger = logging.getLogger(__name__)
 
 allowed_origins = [
     origin.strip()
@@ -27,15 +34,23 @@ allowed_origins = [
 async def lifespan(app: FastAPI):
     """Application lifecycle"""
     # Startup
+    if settings.app_env == "production" and not database.is_mysql_url():
+        raise RuntimeError("Production requires DATABASE_URL with mysql+pymysql")
     os.makedirs(settings.upload_dir, exist_ok=True)
     os.makedirs(settings.output_dir, exist_ok=True)
+    database.initialize()
+    if settings.cleanup_enabled:
+        cleanup_result = run_cleanup(dry_run=False)
+        logger.info("Startup cleanup summary=%s", cleanup_result.get("summary", {}))
     await init_queue()
-    print(f"[OK] Server started: http://0.0.0.0:{settings.port}")
-    print(f"[OK] Upload dir: {settings.upload_dir}")
-    print(f"[OK] Output dir: {settings.output_dir}")
+    logger.info("Server started host=0.0.0.0 port=%s", settings.port)
+    logger.info("Upload dir=%s", settings.upload_dir)
+    logger.info("Output dir=%s", settings.output_dir)
+    logger.info("Object storage mode=%s", settings.object_storage_mode)
+    logger.info("Auth enabled=%s rate_limit_enabled=%s", settings.auth_enabled, settings.rate_limit_enabled)
     yield
     # Shutdown
-    print("[INFO] Server shutting down")
+    logger.info("Server shutting down")
 
 
 app = FastAPI(
@@ -49,7 +64,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=False,
+    allow_credentials=settings.auth_enabled,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -60,6 +75,8 @@ app.include_router(task.router)
 app.include_router(result.router)
 app.include_router(asset.router)
 app.include_router(quality_review.router)
+app.include_router(auth.router)
+app.include_router(auth.platform_router)
 
 
 @app.get("/api/health")
@@ -70,7 +87,17 @@ async def health_check():
         "version": "1.0.0",
         "upload_dir_exists": os.path.exists(settings.upload_dir),
         "output_dir_exists": os.path.exists(settings.output_dir),
+        "object_storage_mode": settings.object_storage_mode,
+        "auth_enabled": settings.auth_enabled,
+        "auth_mode": settings.auth_mode,
+        "rate_limit_enabled": settings.rate_limit_enabled,
+        "database": "mysql" if database.is_mysql_url() else "sqlite-local",
     }
+
+
+@app.get("/healthz", include_in_schema=False)
+async def healthz():
+    return await health_check()
 
 
 # Static file serving for frontend (must be last - catches all remaining paths)

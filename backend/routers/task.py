@@ -8,13 +8,22 @@ import zipfile
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 from backend.config import settings
 from backend.models.asset import AssetLibrary
+from backend.models.clothing import SUPPORTED_CLOTHING_TYPES
 from backend.models.task import Task
+from backend.security.auth import AuthUser, current_user_from_request
+from backend.security.rate_limit import (
+    RateLimitExceeded,
+    check_create_task_rate,
+    identify_subject,
+    raise_http_429,
+)
 from backend.services.task_queue import enqueue_task
+from backend.storage.object_storage import get_object_storage
 from backend.utils.image import resolve_upload_path
 
 router = APIRouter(prefix="/api", tags=["任务"])
@@ -24,7 +33,7 @@ MAX_SCENE_PROMPT_LENGTH = 240
 POSE_MODES = {"stable", "light", "experimental"}
 STABLE_POSE = "保持原姿势"
 LIGHT_POSES = {"正面站姿，双臂自然下垂", "轻微行走感，裙摆自然展开"}
-CLOTHING_TYPES = {"wedding_gown"}
+CLOTHING_TYPES = SUPPORTED_CLOTHING_TYPES
 EXPORT_NAME_PATTERN = re.compile(r"[^0-9A-Za-z\u4e00-\u9fff._-]+")
 
 
@@ -51,6 +60,16 @@ def _remove_dir_if_safe(path: str, root: str) -> bool:
     return True
 
 
+def _remove_object_if_safe(path: Optional[str]) -> bool:
+    if not path:
+        return False
+    try:
+        storage_key = Task.to_storage_path(path)
+        return bool(storage_key and get_object_storage().delete(storage_key))
+    except Exception:
+        return False
+
+
 def _remaining_input_paths() -> set[str]:
     paths: set[str] = set()
     for task in Task.list_internal():
@@ -66,31 +85,58 @@ def _remaining_input_paths() -> set[str]:
 def _cleanup_task_files(task: Task) -> dict:
     removed_files = 0
     removed_dirs = 0
+    removed_objects = 0
 
     output_dir = os.path.join(settings.output_dir, task.task_id)
     if _remove_dir_if_safe(output_dir, settings.output_dir):
         removed_dirs += 1
+        removed_objects += 1 if _remove_object_if_safe(f"outputs/{task.task_id}") else 0
     else:
         for path in task.output_files.values():
             if _remove_file_if_safe(path, settings.output_dir):
                 removed_files += 1
+            if _remove_object_if_safe(path):
+                removed_objects += 1
 
     remaining_inputs = _remaining_input_paths()
     for path in [task.model_file, task.dress_file, task.face_file, task.pose_reference_file]:
         if path and os.path.abspath(path) not in remaining_inputs:
             if _remove_file_if_safe(path, settings.upload_dir):
                 removed_files += 1
+            if _remove_object_if_safe(path):
+                removed_objects += 1
 
-    return {"removed_files": removed_files, "removed_dirs": removed_dirs}
+    return {
+        "removed_files": removed_files,
+        "removed_dirs": removed_dirs,
+        "removed_objects": removed_objects,
+    }
+
+
+def _check_generation_rate(request: Request, user: AuthUser, amount: int = 1) -> None:
+    try:
+        check_create_task_rate(
+            identify_subject(request, user.user_id if user.is_authenticated else None),
+            amount=amount,
+        )
+    except RateLimitExceeded as exc:
+        raise_http_429(exc)
 
 
 def _task_series_root(task: Task) -> str:
     return task.parent_task_id or task.task_id
 
 
-def _next_rerun_index(root_task_id: str) -> int:
+def _next_rerun_index(
+    root_task_id: str,
+    tenant_id: Optional[str] = None,
+    platform_user_id: Optional[str] = None,
+) -> int:
     series = [
-        task for task in Task.list_internal()
+        task for task in Task.list_internal(
+            tenant_id=tenant_id,
+            platform_user_id=platform_user_id,
+        )
         if task.task_id == root_task_id or task.parent_task_id == root_task_id
     ]
     if not series:
@@ -100,8 +146,16 @@ def _next_rerun_index(root_task_id: str) -> int:
 
 def _clone_task_for_rerun(source: Task) -> Task:
     root_task_id = _task_series_root(source)
-    next_index = _next_rerun_index(root_task_id)
-    root_task = Task.get(root_task_id)
+    next_index = _next_rerun_index(
+        root_task_id,
+        tenant_id=source.tenant_id,
+        platform_user_id=source.platform_user_id,
+    )
+    root_task = Task.get(
+        root_task_id,
+        tenant_id=source.tenant_id,
+        platform_user_id=source.platform_user_id,
+    )
     base_name = (root_task.name if root_task else source.name) or f"任务_{root_task_id}"
 
     return Task(
@@ -121,6 +175,10 @@ def _clone_task_for_rerun(source: Task) -> Task:
         generation_mode=source.generation_mode,
         parent_task_id=root_task_id,
         rerun_index=next_index,
+        tenant_id=source.tenant_id,
+        platform_user_id=source.platform_user_id,
+        local_user_id=source.local_user_id,
+        app_code=source.app_code,
     )
 
 
@@ -130,20 +188,34 @@ def _safe_export_name(value: str) -> str:
     return cleaned[:48] or "deliverable"
 
 
-def _exportable_deliverables() -> list[tuple[Task, str]]:
+def _exportable_deliverables(
+    tenant_id: Optional[str] = None,
+    platform_user_id: Optional[str] = None,
+) -> list[tuple[Task, str]]:
     deliverables: list[tuple[Task, str]] = []
-    for task in Task.list_internal():
+    for task in Task.list_internal(
+        tenant_id=tenant_id,
+        platform_user_id=platform_user_id,
+    ):
         if not task.is_deliverable or task.status.value != "completed":
             continue
         final_path = task.output_files.get("final")
-        resolved_path = Task.resolve_storage_path(final_path)
-        if resolved_path and os.path.isfile(resolved_path):
-            deliverables.append((task, resolved_path))
+        if final_path and Task.output_exists(final_path):
+            deliverables.append((task, final_path))
 
     return sorted(
         deliverables,
         key=lambda item: item[0].deliverable_at or item[0].completed_at or item[0].created_at,
     )
+
+
+def _read_output_bytes(path: str) -> bytes:
+    resolved_path = Task.resolve_storage_path(path)
+    if resolved_path and os.path.isfile(resolved_path):
+        with open(resolved_path, "rb") as f:
+            return f.read()
+    storage_key = Task.to_storage_path(path)
+    return get_object_storage().get_bytes(storage_key)
 
 
 class CreateTaskRequest(BaseModel):
@@ -171,7 +243,7 @@ class DeliverableRequest(BaseModel):
     is_deliverable: bool = True
 
 
-def _build_task(req: CreateTaskRequest) -> Task:
+def _build_task(req: CreateTaskRequest, user: AuthUser) -> Task:
     scene_prompt = (req.scene_prompt or "").strip()
     pose = (req.pose or STABLE_POSE).strip() or STABLE_POSE
     pose_mode = req.pose_mode
@@ -193,7 +265,8 @@ def _build_task(req: CreateTaskRequest) -> Task:
         raise HTTPException(400, detail="生成模式只支持 stable 或 creative")
 
     if req.clothing_type not in CLOTHING_TYPES:
-        raise HTTPException(400, detail="当前版本只开放婚纱模式，其他服装类型后续扩展")
+        valid = ", ".join(sorted(CLOTHING_TYPES))
+        raise HTTPException(400, detail=f"Unsupported clothing_type. Supported values: {valid}")
 
     if pose_mode not in POSE_MODES:
         raise HTTPException(400, detail="动作模式只支持 stable、light 或 experimental")
@@ -228,13 +301,22 @@ def _build_task(req: CreateTaskRequest) -> Task:
         pose_mode=pose_mode,
         preserve_face=req.preserve_face,
         generation_mode=req.generation_mode,
+        tenant_id=user.tenant_id,
+        platform_user_id=user.platform_user_id,
+        local_user_id=user.local_user_id,
+        app_code=user.app_code,
     )
 
 
 @router.post("/create-task")
-async def create_task(req: CreateTaskRequest):
+async def create_task(
+    req: CreateTaskRequest,
+    request: Request,
+    user: AuthUser = Depends(current_user_from_request),
+):
     """创建单个生成任务"""
-    task = _build_task(req)
+    _check_generation_rate(request, user)
+    task = _build_task(req, user)
     task.save()
 
     # 提交到任务队列
@@ -248,11 +330,16 @@ async def create_task(req: CreateTaskRequest):
 
 
 @router.post("/batch-create")
-async def batch_create(req: BatchCreateRequest):
+async def batch_create(
+    req: BatchCreateRequest,
+    request: Request,
+    user: AuthUser = Depends(current_user_from_request),
+):
     """批量创建任务"""
+    _check_generation_rate(request, user, amount=len(req.tasks))
     task_ids = []
     for t in req.tasks:
-        task = _build_task(t)
+        task = _build_task(t, user)
         task.save()
         await enqueue_task(task.task_id)
         task_ids.append(task.task_id)
@@ -265,18 +352,25 @@ async def batch_create(req: BatchCreateRequest):
 
 
 @router.get("/task/{task_id}")
-async def get_task(task_id: str):
+async def get_task(task_id: str, user: AuthUser = Depends(current_user_from_request)):
     """查询任务状态"""
-    task = Task.get(task_id)
+    task = Task.get(
+        task_id,
+        tenant_id=user.tenant_id,
+        platform_user_id=user.platform_user_id,
+    )
     if not task:
         raise HTTPException(404, detail="任务不存在")
     return {"success": True, "task": task.to_public_dict()}
 
 
 @router.get("/deliverables/export")
-async def export_deliverables():
+async def export_deliverables(user: AuthUser = Depends(current_user_from_request)):
     """导出所有已标记可交付的最终图。"""
-    deliverables = _exportable_deliverables()
+    deliverables = _exportable_deliverables(
+        tenant_id=user.tenant_id,
+        platform_user_id=user.platform_user_id,
+    )
     if not deliverables:
         raise HTTPException(404, detail="还没有可导出的可交付成品")
 
@@ -289,7 +383,7 @@ async def export_deliverables():
             safe_name = _safe_export_name(task.name or task.task_id)
             archive_name = f"images/{index:03d}_{safe_name}_{task.task_id}{extension.lower()}"
 
-            archive.write(final_path, archive_name)
+            archive.writestr(archive_name, _read_output_bytes(final_path))
             manifest.append(
                 {
                     "index": index,
@@ -327,15 +421,23 @@ async def export_deliverables():
 
 
 @router.patch("/task/{task_id}/deliverable")
-async def update_task_deliverable(task_id: str, req: DeliverableRequest):
+async def update_task_deliverable(
+    task_id: str,
+    req: DeliverableRequest,
+    user: AuthUser = Depends(current_user_from_request),
+):
     """标记或取消标记最终图是否可交付。"""
-    task = Task.get(task_id)
+    task = Task.get(
+        task_id,
+        tenant_id=user.tenant_id,
+        platform_user_id=user.platform_user_id,
+    )
     if not task:
         raise HTTPException(404, detail="任务不存在")
 
     if req.is_deliverable:
         final_path = task.output_files.get("final")
-        final_exists = bool(final_path and os.path.isfile(Task.resolve_storage_path(final_path)))
+        final_exists = bool(final_path and Task.output_exists(final_path))
         if task.status.value != "completed" or not final_exists:
             raise HTTPException(409, detail="只有已完成且最终图文件存在的任务可以标记为可交付")
 
@@ -347,15 +449,24 @@ async def update_task_deliverable(task_id: str, req: DeliverableRequest):
 
 
 @router.post("/task/{task_id}/rerun")
-async def rerun_task(task_id: str):
+async def rerun_task(
+    task_id: str,
+    request: Request,
+    user: AuthUser = Depends(current_user_from_request),
+):
     """基于同一组素材和参数重跑一个新版本"""
-    task = Task.get(task_id)
+    task = Task.get(
+        task_id,
+        tenant_id=user.tenant_id,
+        platform_user_id=user.platform_user_id,
+    )
     if not task:
         raise HTTPException(404, detail="任务不存在")
 
     if task.status.value == "processing":
         raise HTTPException(409, detail="任务正在生成中，请完成或失败后再重跑")
 
+    _check_generation_rate(request, user)
     rerun = _clone_task_for_rerun(task)
     rerun.save()
     await enqueue_task(rerun.task_id)
@@ -370,16 +481,24 @@ async def rerun_task(task_id: str):
 
 
 @router.delete("/task/{task_id}")
-async def delete_task(task_id: str):
+async def delete_task(task_id: str, user: AuthUser = Depends(current_user_from_request)):
     """删除任务记录和本地文件"""
-    task = Task.get(task_id)
+    task = Task.get(
+        task_id,
+        tenant_id=user.tenant_id,
+        platform_user_id=user.platform_user_id,
+    )
     if not task:
         raise HTTPException(404, detail="任务不存在")
 
     if task.status.value == "processing":
         raise HTTPException(409, detail="任务正在生成中，请完成或失败后再删除")
 
-    deleted_task = Task.delete(task_id)
+    deleted_task = Task.delete(
+        task_id,
+        tenant_id=user.tenant_id,
+        platform_user_id=user.platform_user_id,
+    )
     if not deleted_task:
         raise HTTPException(404, detail="任务不存在")
 
@@ -393,9 +512,13 @@ async def list_tasks(
     deliverable: Optional[bool] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    user: AuthUser = Depends(current_user_from_request),
 ):
     """任务列表"""
-    tasks = Task.list_all()
+    tasks = Task.list_all(
+        tenant_id=user.tenant_id,
+        platform_user_id=user.platform_user_id,
+    )
 
     if status:
         tasks = [t for t in tasks if t.get("status") == status]

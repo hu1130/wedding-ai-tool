@@ -7,6 +7,11 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
+from backend.config import settings
+
+from backend.storage import database
+from backend.storage.object_storage import get_object_storage
+
 
 class TaskStatus(str, Enum):
     PENDING = "pending"
@@ -32,8 +37,15 @@ STEP_LABELS = {
 }
 
 
+def _non_negative_int(value, default: int = 0) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
 class Task:
-    """任务模型，用 JSON 文件持久化。"""
+    """任务模型，使用 SQLite 持久化并兼容旧 JSON 迁移。"""
 
     DATA_FILE = ""
     _FILE_LOCK = threading.Lock()
@@ -60,6 +72,15 @@ class Task:
         rerun_index: int = 1,
         is_deliverable: bool = False,
         deliverable_at: str = "",
+        retry_count: int = 0,
+        max_retries: Optional[int] = None,
+        last_error_at: str = "",
+        last_error_stage: str = "",
+        next_retry_at: str = "",
+        tenant_id: str = "",
+        platform_user_id: str = "",
+        local_user_id: str = "",
+        app_code: str = "",
     ):
         self.task_id = task_id or uuid.uuid4().hex[:12]
         self.name = name or f"任务_{self.task_id}"
@@ -82,6 +103,19 @@ class Task:
         self.rerun_index = rerun_index
         self.is_deliverable = is_deliverable
         self.deliverable_at = deliverable_at
+        self.retry_count = _non_negative_int(retry_count, 0)
+        self.max_retries = (
+            settings.max_task_retries
+            if max_retries is None
+            else _non_negative_int(max_retries, settings.max_task_retries)
+        )
+        self.last_error_at = last_error_at
+        self.last_error_stage = last_error_stage
+        self.next_retry_at = next_retry_at
+        self.tenant_id = tenant_id or database.DEFAULT_TENANT_ID
+        self.platform_user_id = platform_user_id or database.DEFAULT_PLATFORM_USER_ID
+        self.local_user_id = local_user_id or database.DEFAULT_LOCAL_USER_ID
+        self.app_code = app_code or settings.app_code
         self.output_files = {}
         self.error_message = ""
         self.created_at = datetime.now().isoformat()
@@ -96,6 +130,10 @@ class Task:
     def to_dict(self) -> dict:
         return {
             "task_id": self.task_id,
+            "tenant_id": self.tenant_id,
+            "platform_user_id": self.platform_user_id,
+            "local_user_id": self.local_user_id,
+            "app_code": self.app_code,
             "name": self.name,
             "status": self.status.value,
             "progress": self.progress,
@@ -116,6 +154,11 @@ class Task:
             "rerun_index": self.rerun_index,
             "is_deliverable": self.is_deliverable,
             "deliverable_at": self.deliverable_at,
+            "retry_count": self.retry_count,
+            "max_retries": self.max_retries,
+            "last_error_at": self.last_error_at,
+            "last_error_stage": self.last_error_stage,
+            "next_retry_at": self.next_retry_at,
             "output_files": {
                 key: self.to_storage_path(path)
                 for key, path in self.output_files.items()
@@ -137,9 +180,22 @@ class Task:
         data["output_files"] = {
             key: True
             for key, path in self.output_files.items()
-            if path and os.path.exists(self.resolve_storage_path(path))
+            if path and self.output_exists(path)
         }
         return data
+
+    @classmethod
+    def output_exists(cls, path: Optional[str]) -> bool:
+        if not path:
+            return False
+        resolved = cls.resolve_storage_path(path)
+        if resolved and os.path.exists(resolved):
+            return True
+        try:
+            storage_key = cls.to_storage_path(path)
+            return bool(storage_key and get_object_storage().exists(storage_key))
+        except Exception:
+            return False
 
     def current_step(self) -> tuple[str, str]:
         ordered_steps = ("dress", "face", "scene", "upscale")
@@ -194,6 +250,15 @@ class Task:
             rerun_index=rerun_index,
             is_deliverable=bool(data.get("is_deliverable", False)),
             deliverable_at=data.get("deliverable_at", ""),
+            retry_count=data.get("retry_count", 0),
+            max_retries=data.get("max_retries", settings.max_task_retries),
+            last_error_at=data.get("last_error_at", ""),
+            last_error_stage=data.get("last_error_stage", ""),
+            next_retry_at=data.get("next_retry_at", ""),
+            tenant_id=data.get("tenant_id", database.DEFAULT_TENANT_ID),
+            platform_user_id=data.get("platform_user_id", database.DEFAULT_PLATFORM_USER_ID),
+            local_user_id=data.get("local_user_id", database.DEFAULT_LOCAL_USER_ID),
+            app_code=data.get("app_code", settings.app_code),
         )
 
         try:
@@ -228,6 +293,21 @@ class Task:
                 os.path.dirname(os.path.dirname(__file__)), "tasks.json"
             )
         return cls.DATA_FILE
+
+    @classmethod
+    def _default_data_path(cls) -> str:
+        return os.path.join(os.path.dirname(os.path.dirname(__file__)), "tasks.json")
+
+    @classmethod
+    def _database_path(cls) -> Optional[str]:
+        if database.has_configured_database() or not cls.DATA_FILE:
+            return None
+
+        data_path = os.path.abspath(cls.DATA_FILE)
+        default_path = os.path.abspath(cls._default_data_path())
+        if data_path == default_path:
+            return None
+        return os.path.join(os.path.dirname(data_path), "app.db")
 
     @classmethod
     def project_root(cls) -> str:
@@ -315,7 +395,7 @@ class Task:
         return normalized
 
     @classmethod
-    def _read_task_records(cls) -> list[dict]:
+    def _read_legacy_task_records(cls) -> list[dict]:
         path = cls._data_path()
         if not os.path.exists(path):
             return []
@@ -327,70 +407,104 @@ class Task:
         except json.JSONDecodeError as exc:
             raise RuntimeError("Task data file is corrupted; repair tasks.json first") from exc
 
-    def save(self):
-        path = self._data_path()
-        with self._FILE_LOCK:
-            tasks = self._read_task_records()
-
-            updated = False
-            for index, item in enumerate(tasks):
-                if item.get("task_id") == self.task_id:
-                    tasks[index] = self.to_dict()
-                    updated = True
-                    break
-            if not updated:
-                tasks.append(self.to_dict())
-
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            tmp_path = f"{path}.tmp"
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(tasks, f, ensure_ascii=False, indent=2)
-            os.replace(tmp_path, path)
+    @classmethod
+    def _legacy_migration_key(cls) -> str:
+        return f"legacy_tasks_migrated:{os.path.abspath(cls._data_path())}"
 
     @classmethod
-    def get(cls, task_id: str) -> Optional["Task"]:
+    def _migrate_legacy_json_once(cls) -> None:
+        path = cls._data_path()
+        if not os.path.exists(path):
+            return
+
+        db_path = cls._database_path()
+        migration_key = cls._legacy_migration_key()
+        if database.get_metadata(migration_key, db_path=db_path) == "1":
+            return
+
+        for record in cls._read_legacy_task_records():
+            database.upsert_task_record(record, db_path=db_path)
+        database.set_metadata(migration_key, "1", db_path=db_path)
+
+    @classmethod
+    def _read_task_records(
+        cls,
+        tenant_id: Optional[str] = None,
+        platform_user_id: Optional[str] = None,
+    ) -> list[dict]:
+        cls._migrate_legacy_json_once()
+        return database.list_task_records(
+            tenant_id=tenant_id,
+            platform_user_id=platform_user_id,
+            db_path=cls._database_path(),
+        )
+
+    def save(self):
+        with self._FILE_LOCK:
+            self._migrate_legacy_json_once()
+            database.upsert_task_record(self.to_dict(), db_path=self._database_path())
+
+    @classmethod
+    def get(
+        cls,
+        task_id: str,
+        tenant_id: Optional[str] = None,
+        platform_user_id: Optional[str] = None,
+    ) -> Optional["Task"]:
         with cls._FILE_LOCK:
-            tasks = cls._read_task_records()
+            tasks = cls._read_task_records(
+                tenant_id=tenant_id,
+                platform_user_id=platform_user_id,
+            )
         for item in tasks:
             if item.get("task_id") == task_id:
                 return cls.from_dict(item)
         return None
 
     @classmethod
-    def list_all(cls) -> list[dict]:
+    def list_all(
+        cls,
+        tenant_id: Optional[str] = None,
+        platform_user_id: Optional[str] = None,
+    ) -> list[dict]:
         with cls._FILE_LOCK:
-            tasks = cls._read_task_records()
+            tasks = cls._read_task_records(
+                tenant_id=tenant_id,
+                platform_user_id=platform_user_id,
+            )
         public_tasks = [cls.from_dict(item).to_public_dict() for item in tasks]
         return sorted(public_tasks, key=lambda item: item.get("created_at", ""), reverse=True)
 
     @classmethod
-    def list_internal(cls) -> list["Task"]:
+    def list_internal(
+        cls,
+        tenant_id: Optional[str] = None,
+        platform_user_id: Optional[str] = None,
+    ) -> list["Task"]:
         with cls._FILE_LOCK:
-            tasks = cls._read_task_records()
+            tasks = cls._read_task_records(
+                tenant_id=tenant_id,
+                platform_user_id=platform_user_id,
+            )
         return [cls.from_dict(item) for item in tasks]
 
     @classmethod
-    def delete(cls, task_id: str) -> Optional["Task"]:
-        path = cls._data_path()
+    def delete(
+        cls,
+        task_id: str,
+        tenant_id: Optional[str] = None,
+        platform_user_id: Optional[str] = None,
+    ) -> Optional["Task"]:
         with cls._FILE_LOCK:
-            tasks = cls._read_task_records()
-
-            deleted = None
-            remaining = []
-            for item in tasks:
-                if item.get("task_id") == task_id:
-                    deleted = item
-                else:
-                    remaining.append(item)
-
+            cls._migrate_legacy_json_once()
+            deleted = database.delete_task_record(
+                task_id,
+                tenant_id=tenant_id,
+                platform_user_id=platform_user_id,
+                db_path=cls._database_path(),
+            )
             if deleted is None:
                 return None
-
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            tmp_path = f"{path}.tmp"
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                json.dump(remaining, f, ensure_ascii=False, indent=2)
-            os.replace(tmp_path, path)
 
         return cls.from_dict(deleted)
 

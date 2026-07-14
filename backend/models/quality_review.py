@@ -1,19 +1,18 @@
 """Quality review storage for generated wedding images."""
-import json
 import os
-import threading
 from datetime import datetime
 from typing import Optional
+
+from backend.storage import database
 
 
 SCORE_FIELDS = ("face_score", "dress_score", "pose_score", "background_score", "overall_score")
 
 
 class QualityReview:
-    """Small JSON-backed review store, keyed by task_id."""
+    """Database-backed review store, keyed by tenant_id + task_id."""
 
     DATA_FILE = ""
-    _FILE_LOCK = threading.Lock()
 
     @classmethod
     def _data_path(cls) -> str:
@@ -24,30 +23,19 @@ class QualityReview:
         return cls.DATA_FILE
 
     @classmethod
-    def _read_records(cls) -> list[dict]:
-        path = cls._data_path()
-        if not os.path.exists(path):
-            return []
-        try:
-            with open(path, "r", encoding="utf-8-sig") as f:
-                data = json.load(f)
-        except FileNotFoundError:
-            return []
-        except json.JSONDecodeError as exc:
-            raise RuntimeError("Quality review data file is corrupted") from exc
-
-        if not isinstance(data, list):
-            return []
-        return [item for item in data if isinstance(item, dict) and item.get("task_id")]
+    def _default_data_path(cls) -> str:
+        return os.path.join(os.path.dirname(os.path.dirname(__file__)), "quality_reviews.json")
 
     @classmethod
-    def _write_records(cls, records: list[dict]) -> None:
-        path = cls._data_path()
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp_path = f"{path}.tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(records, f, ensure_ascii=False, indent=2)
-        os.replace(tmp_path, path)
+    def _database_path(cls) -> Optional[str]:
+        if database.has_configured_database() or not cls.DATA_FILE:
+            return None
+
+        data_path = os.path.abspath(cls.DATA_FILE)
+        default_path = os.path.abspath(cls._default_data_path())
+        if data_path == default_path:
+            return None
+        return os.path.join(os.path.dirname(data_path), "app.db")
 
     @staticmethod
     def normalize_score(value: Optional[int], field_name: str) -> int:
@@ -65,6 +53,9 @@ class QualityReview:
     def to_public_dict(cls, record: dict) -> dict:
         return {
             "task_id": record.get("task_id", ""),
+            "tenant_id": record.get("tenant_id", database.DEFAULT_TENANT_ID),
+            "platform_user_id": record.get("platform_user_id", database.DEFAULT_PLATFORM_USER_ID),
+            "local_user_id": record.get("local_user_id", database.DEFAULT_LOCAL_USER_ID),
             "face_score": record.get("face_score"),
             "dress_score": record.get("dress_score"),
             "pose_score": record.get("pose_score"),
@@ -78,21 +69,33 @@ class QualityReview:
         }
 
     @classmethod
-    def get(cls, task_id: str) -> Optional[dict]:
-        with cls._FILE_LOCK:
-            records = cls._read_records()
-        for item in records:
-            if item.get("task_id") == task_id:
-                return cls.to_public_dict(item)
-        return None
+    def get(
+        cls,
+        task_id: str,
+        tenant_id: Optional[str] = None,
+        platform_user_id: Optional[str] = None,
+    ) -> Optional[dict]:
+        item = database.get_quality_review_record(
+            task_id,
+            tenant_id=tenant_id,
+            platform_user_id=platform_user_id,
+            db_path=cls._database_path(),
+        )
+        return cls.to_public_dict(item) if item else None
 
     @classmethod
-    def list_all(cls) -> list[dict]:
-        with cls._FILE_LOCK:
-            records = cls._read_records()
+    def list_all(
+        cls,
+        tenant_id: Optional[str] = None,
+        platform_user_id: Optional[str] = None,
+    ) -> list[dict]:
         return [
             cls.to_public_dict(item)
-            for item in sorted(records, key=lambda item: item.get("updated_at", ""), reverse=True)
+            for item in database.list_quality_review_records(
+                tenant_id=tenant_id,
+                platform_user_id=platform_user_id,
+                db_path=cls._database_path(),
+            )
         ]
 
     @classmethod
@@ -108,6 +111,10 @@ class QualityReview:
         pass_result: Optional[bool] = None,
         notes: str = "",
         reviewer: str = "",
+        tenant_id: str = "",
+        platform_user_id: str = "",
+        local_user_id: str = "",
+        app_code: str = "",
     ) -> dict:
         normalized = {
             "face_score": cls.normalize_score(face_score, "face_score"),
@@ -129,32 +136,27 @@ class QualityReview:
                 and normalized["overall_score"] >= 4
             )
 
-        now = datetime.now().isoformat()
-        with cls._FILE_LOCK:
-            records = cls._read_records()
-            for index, item in enumerate(records):
-                if item.get("task_id") == task_id:
-                    record = {
-                        **item,
-                        **normalized,
-                        "pass_result": bool(pass_result),
-                        "notes": notes.strip(),
-                        "reviewer": reviewer.strip(),
-                        "updated_at": now,
-                    }
-                    records[index] = record
-                    cls._write_records(records)
-                    return cls.to_public_dict(record)
+        existing = cls.get(task_id, tenant_id=tenant_id or None)
+        if (
+            existing
+            and platform_user_id
+            and existing.get("platform_user_id") != platform_user_id
+        ):
+            raise ValueError("Quality review does not belong to this user")
 
-            record = {
-                "task_id": task_id,
-                **normalized,
-                "pass_result": bool(pass_result),
-                "notes": notes.strip(),
-                "reviewer": reviewer.strip(),
-                "created_at": now,
-                "updated_at": now,
-            }
-            records.append(record)
-            cls._write_records(records)
-            return cls.to_public_dict(record)
+        now = datetime.now().isoformat()
+        record = {
+            "task_id": task_id,
+            "tenant_id": tenant_id or database.DEFAULT_TENANT_ID,
+            "platform_user_id": platform_user_id or database.DEFAULT_PLATFORM_USER_ID,
+            "local_user_id": local_user_id or database.DEFAULT_LOCAL_USER_ID,
+            "app_code": app_code or database.DEFAULT_APP_CODE,
+            **normalized,
+            "pass_result": bool(pass_result),
+            "notes": notes.strip(),
+            "reviewer": reviewer.strip(),
+            "created_at": (existing or {}).get("created_at") or now,
+            "updated_at": now,
+        }
+        database.upsert_quality_review_record(record, db_path=cls._database_path())
+        return cls.to_public_dict(record)

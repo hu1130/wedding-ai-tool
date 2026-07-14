@@ -14,10 +14,12 @@ outputs/
 backend/tasks.json
 backend/tasks.json.bak-*
 backend/assets.json
+backend/data/
 backend/quality_reviews.json
 server.log
 server.err.log
 server-*.log
+dev-*.log
 server.pid
 
 # Local generated and test artifacts

@@ -6,6 +6,7 @@ import unittest
 import uuid
 
 from backend.models.task import INTERRUPTED_TASK_MESSAGE, StepStatus, Task, TaskStatus
+from backend.storage import database
 
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
@@ -16,6 +17,7 @@ class TaskStorageTest(unittest.TestCase):
         self.original_data_file = Task.DATA_FILE
         self.data_dir = tempfile.TemporaryDirectory()
         Task.DATA_FILE = os.path.join(self.data_dir.name, "tasks.json")
+        self.db_path = os.path.join(self.data_dir.name, "app.db")
         self.project_root = Task.project_root()
         self.test_id = uuid.uuid4().hex[:10]
         self.created_files: list[str] = []
@@ -91,8 +93,7 @@ class TaskStorageTest(unittest.TestCase):
         task.output_files["final"] = final
         task.save()
 
-        with open(Task.DATA_FILE, "r", encoding="utf-8") as f:
-            saved = json.load(f)
+        saved = database.list_task_records(db_path=self.db_path)
 
         self.assertEqual(1, len(saved))
         saved_task = saved[0]
@@ -113,8 +114,7 @@ class TaskStorageTest(unittest.TestCase):
 
         deleted = Task.delete(task.task_id)
         self.assertIsNotNone(deleted)
-        with open(Task.DATA_FILE, "r", encoding="utf-8") as f:
-            self.assertEqual([], json.load(f))
+        self.assertEqual([], database.list_task_records(db_path=self.db_path))
 
     def test_recover_interrupted_processing_tasks(self):
         interrupted = Task(task_id=f"processing_{self.test_id}")
